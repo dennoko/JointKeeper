@@ -16,6 +16,7 @@ namespace Dennokoworks.JointKeeper.Editor
         private bool _showElbowAdvanced;
         private bool _showKneeAdvanced;
         private bool _showTwistDiagnostics;
+        private bool _showSceneHandles;
 
         private SerializedProperty _targetMode;
         private SerializedProperty _targetRenderers;
@@ -66,11 +67,22 @@ namespace Dennokoworks.JointKeeper.Editor
                 EditorGUILayout.Space(2f);
                 DrawAdvancedJointSection("膝 (Knees) 詳細", ref _showKneeAdvanced, _leftKnee, _rightKnee, _unlinkKnee, comp, isElbow: false);
                 EditorGUILayout.Space(4f);
+                _showSceneHandles = EditorGUILayout.ToggleLeft("Scene ビュー操作ハンドルを表示 (Pivot / Outward)", _showSceneHandles);
                 DrawTwistDiagnostics(comp, avatarAnimator, avatarRoot);
                 EditorGUI.indentLevel--;
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        private void OnSceneGUI()
+        {
+            var comp = (JointKeeperComponent)target;
+            if (comp == null || !comp.enabled) return;
+
+            Animator avatarAnimator = FindAvatarAnimator(comp.transform);
+            Transform avatarRoot = avatarAnimator != null ? avatarAnimator.transform : comp.transform.root;
+            JointKeeperSceneHandles.DrawSceneGUI(comp, avatarAnimator, avatarRoot, _showSceneHandles);
         }
 
         private static void DrawStatusAndPlacementGuides(
