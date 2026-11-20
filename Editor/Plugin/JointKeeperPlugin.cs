@@ -15,7 +15,8 @@ namespace Dennokoworks.JointKeeper.Editor
             InPhase(BuildPhase.Transforming)
                 .AfterPlugin("nadena.dev.modular-avatar")
                 .BeforePlugin("com.anatawa12.avatar-optimizer")
-                .Run(JointKeeperPass.Instance);
+                .Run(JointKeeperPass.Instance)
+                .PreviewingWith(new JointKeeperRenderFilter());
         }
     }
 }

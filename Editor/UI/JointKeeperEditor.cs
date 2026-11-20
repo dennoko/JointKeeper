@@ -55,6 +55,8 @@ namespace Dennokoworks.JointKeeper.Editor
             DrawSimpleJointControls("肘 (Elbows)", _leftElbow, _rightElbow, _unlinkElbow);
             EditorGUILayout.Space(2f);
             DrawSimpleJointControls("膝 (Knees)", _leftKnee, _rightKnee, _unlinkKnee);
+            EditorGUILayout.Space(4f);
+            DrawPreviewControls(avatarRoot);
 
             EditorGUILayout.Space(6f);
             _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "詳細設定 (Advanced)", true, EditorStyles.foldoutHeader);
@@ -68,11 +70,68 @@ namespace Dennokoworks.JointKeeper.Editor
                 DrawAdvancedJointSection("膝 (Knees) 詳細", ref _showKneeAdvanced, _leftKnee, _rightKnee, _unlinkKnee, comp, isElbow: false);
                 EditorGUILayout.Space(4f);
                 _showSceneHandles = EditorGUILayout.ToggleLeft("Scene ビュー操作ハンドルを表示 (Pivot / Outward)", _showSceneHandles);
+                if (avatarRoot != null && GUILayout.Button("関節フレーム再計算（マッスル軸実測）"))
+                {
+                    JointKeeperPreviewState.ResampleMeasuredAxesSafe(avatarRoot.gameObject);
+                    SceneView.RepaintAll();
+                }
                 DrawTwistDiagnostics(comp, avatarAnimator, avatarRoot);
                 EditorGUI.indentLevel--;
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        private static void DrawPreviewControls(Transform avatarRoot)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            bool nextEnabled = EditorGUILayout.ToggleLeft("Edit モード曲げプレビュー (NDMF Preview)", JointKeeperPreviewState.Enabled, EditorStyles.boldLabel);
+            if (nextEnabled != JointKeeperPreviewState.Enabled)
+            {
+                JointKeeperPreviewState.SetEnabled(nextEnabled);
+                SceneView.RepaintAll();
+            }
+            if (JointKeeperPreviewState.Enabled && GUILayout.Button("リセット", GUILayout.Width(64f)))
+            {
+                JointKeeperPreviewState.ResetPose();
+                SceneView.RepaintAll();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (JointKeeperPreviewState.Enabled)
+            {
+                EditorGUI.indentLevel++;
+                float nextBend = EditorGUILayout.Slider("曲げ角 (Bend °)", JointKeeperPreviewState.BendAngleDeg, 0f, 150f);
+                if (!Mathf.Approximately(nextBend, JointKeeperPreviewState.BendAngleDeg))
+                {
+                    JointKeeperPreviewState.SetBendAngle(nextBend);
+                    SceneView.RepaintAll();
+                }
+
+                float nextTwist = EditorGUILayout.Slider("前腕ツイスト (Twist °)", JointKeeperPreviewState.TwistAngleDeg, -90f, 90f);
+                if (!Mathf.Approximately(nextTwist, JointKeeperPreviewState.TwistAngleDeg))
+                {
+                    JointKeeperPreviewState.SetTwistAngle(nextTwist);
+                    SceneView.RepaintAll();
+                }
+
+                bool nextBefore = EditorGUILayout.Toggle("適用前と比較 (Before 表示)", JointKeeperPreviewState.ShowBeforeOnly);
+                if (nextBefore != JointKeeperPreviewState.ShowBeforeOnly)
+                {
+                    JointKeeperPreviewState.SetShowBeforeOnly(nextBefore);
+                    SceneView.RepaintAll();
+                }
+
+                var nextHm = (PreviewHeatmapMode)EditorGUILayout.EnumPopup("ヒートマップ表示", JointKeeperPreviewState.HeatmapMode);
+                if (nextHm != JointKeeperPreviewState.HeatmapMode)
+                {
+                    JointKeeperPreviewState.SetHeatmapMode(nextHm);
+                    SceneView.RepaintAll();
+                }
+                EditorGUI.indentLevel--;
+            }
+            EditorGUILayout.EndVertical();
         }
 
         private void OnSceneGUI()
