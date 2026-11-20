@@ -52,7 +52,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 bool anyEnabled = false;
                 for (int i = 0; i < jkComps.Length; i++)
                 {
-                    if (jkComps[i] != null && jkComps[i].enabled)
+                    if (jkComps[i] != null && jkComps[i].enabled && !jkComps[i].IsBaked)
                     {
                         anyEnabled = true;
                         context.Observe(jkComps[i]);
@@ -130,7 +130,7 @@ namespace Dennokoworks.JointKeeper.Editor
             var enabledComps = new List<JointKeeperComponent>();
             for (int i = 0; i < allComps.Length; i++)
             {
-                if (allComps[i] != null && allComps[i].enabled)
+                if (allComps[i] != null && allComps[i].enabled && !allComps[i].IsBaked)
                 {
                     enabledComps.Add(allComps[i]);
                     context.Observe(allComps[i]);
@@ -314,7 +314,7 @@ namespace Dennokoworks.JointKeeper.Editor
             {
                 var comp = components[i];
                 bool isManual = comp.targetMode == TargetRendererMode.ManualList;
-                var targets = JointKeeperPass.CollectTargets(comp, avatarRoot);
+                var targets = JointKeeperTargetCollector.CollectTargets(comp, avatarRoot);
 
                 foreach (var smr in targets)
                 {

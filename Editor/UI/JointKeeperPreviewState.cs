@@ -89,6 +89,14 @@ namespace Dennokoworks.JointKeeper.Editor
             NotifyChanged();
         }
 
+        public static void BumpStructureVersion()
+        {
+#if JOINT_KEEPER_NDMF
+            StructureVersionPublished.Value = StructureVersionPublished.Value + 1;
+#endif
+            NotifyChanged();
+        }
+
         public static Dictionary<JointId, Vector3> GetCachedMeasuredAxes(GameObject avatarRoot)
         {
             if (avatarRoot == null) return null;

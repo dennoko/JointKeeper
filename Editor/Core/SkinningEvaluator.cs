@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Dennokoworks.JointKeeper.Editor
@@ -11,7 +12,9 @@ namespace Dennokoworks.JointKeeper.Editor
         /// SkinnedMeshRenderer の現在の BlendShape・ボーン姿勢から全頂点のワールド座標を CPU で厳密算出する。
         /// 非アクティブなトグル衣装でも同一の結果を返す。
         /// </summary>
-        public static Vector3[] EvaluateWorldVerticesCpu(SkinnedMeshRenderer smr)
+        public static Vector3[] EvaluateWorldVerticesCpu(
+            SkinnedMeshRenderer smr,
+            Dictionary<Transform, Vector3> extraBoneScales = null)
         {
             if (smr == null || smr.sharedMesh == null)
                 return System.Array.Empty<Vector3>();
@@ -22,7 +25,7 @@ namespace Dennokoworks.JointKeeper.Editor
             for (int i = 0; i < bsCount; i++)
                 weights[i] = smr.GetBlendShapeWeight(i);
 
-            return EvaluateWorldVerticesCpu(mesh, smr.bones, weights);
+            return EvaluateWorldVerticesCpu(mesh, smr.bones, weights, null, null, extraBoneScales);
         }
 
         /// <summary>
@@ -33,7 +36,8 @@ namespace Dennokoworks.JointKeeper.Editor
             Transform[] bones,
             float[] blendShapeWeights = null,
             BoneWeight[] boneWeightsOverride = null,
-            Matrix4x4[] bindposesOverride = null)
+            Matrix4x4[] bindposesOverride = null,
+            Dictionary<Transform, Vector3> extraBoneScales = null)
         {
             if (mesh == null)
                 return System.Array.Empty<Vector3>();
@@ -97,7 +101,10 @@ namespace Dennokoworks.JointKeeper.Editor
             {
                 if (bones[b] != null)
                 {
-                    skinMatrices[b] = bones[b].localToWorldMatrix * bindposes[b];
+                    Matrix4x4 boneWorld = bones[b].localToWorldMatrix;
+                    if (extraBoneScales != null && extraBoneScales.TryGetValue(bones[b], out Vector3 extraScale))
+                        boneWorld = boneWorld * Matrix4x4.Scale(extraScale);
+                    skinMatrices[b] = boneWorld * bindposes[b];
                     validBone[b] = true;
                 }
             }

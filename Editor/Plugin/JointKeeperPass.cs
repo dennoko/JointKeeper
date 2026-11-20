@@ -43,7 +43,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 var enabledComponents = new List<JointKeeperComponent>(allComponents.Length);
                 for (int i = 0; i < allComponents.Length; i++)
                 {
-                    if (allComponents[i] != null && allComponents[i].enabled)
+                    if (allComponents[i] != null && allComponents[i].enabled && !allComponents[i].IsBaked)
                         enabledComponents.Add(allComponents[i]);
                 }
 
@@ -387,42 +387,7 @@ namespace Dennokoworks.JointKeeper.Editor
 
         public static List<SkinnedMeshRenderer> CollectTargets(JointKeeperComponent comp, Transform avatarRoot)
         {
-            var result = new List<SkinnedMeshRenderer>();
-            if (comp == null) return result;
-
-            if (comp.targetMode == TargetRendererMode.ManualList)
-            {
-                if (comp.targetRenderers == null) return result;
-                var seen = new HashSet<SkinnedMeshRenderer>();
-                foreach (var smr in comp.targetRenderers)
-                {
-                    if (smr == null || !seen.Add(smr)) continue;
-                    if (avatarRoot != null && !smr.transform.IsChildOf(avatarRoot))
-                    {
-                        Debug.LogWarning($"[JointKeeper] アバター外の SkinnedMeshRenderer '{smr.name}' が指定されているため無視しました。", comp);
-                        continue;
-                    }
-                    result.Add(smr);
-                }
-                return result;
-            }
-
-            var excluded = new HashSet<SkinnedMeshRenderer>();
-            if (comp.excludedRenderers != null)
-            {
-                foreach (var ex in comp.excludedRenderers)
-                {
-                    if (ex != null) excluded.Add(ex);
-                }
-            }
-
-            var found = comp.GetComponentsInChildren<SkinnedMeshRenderer>(true);
-            for (int i = 0; i < found.Length; i++)
-            {
-                if (found[i] != null && !excluded.Contains(found[i]))
-                    result.Add(found[i]);
-            }
-            return result;
+            return JointKeeperTargetCollector.CollectTargets(comp, avatarRoot, logOutOfAvatarWarning: true);
         }
 
         private static int ComputeAncestorDepth(Transform smrTransform, Transform componentTransform)

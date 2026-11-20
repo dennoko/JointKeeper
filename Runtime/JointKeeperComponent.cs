@@ -26,6 +26,15 @@ namespace Dennokoworks.JointKeeper
         public JointConfig leftKnee = JointConfig.CreateKneeDefault();
         public JointConfig rightKnee = JointConfig.CreateKneeDefault();
 
+        [HideInInspector]
+        public JointBakeRecord bakeRecord = new JointBakeRecord();
+
+        /// <summary>
+        /// 破壊的ベイクで既にメッシュ差し替え済みかどうか。
+        /// true の間は NDMF ビルド・プレビューの二重適用を防止する。
+        /// </summary>
+        public bool IsBaked => bakeRecord != null && bakeRecord.isBaked;
+
         /// <summary>
         /// 左右リンク設定を考慮した解決済み JointConfig を返す。
         /// 右側がリンク中の場合は left の数値をミラー適用し、右側のボーン参照リストを保持する。

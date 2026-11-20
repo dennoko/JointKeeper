@@ -17,6 +17,7 @@ namespace Dennokoworks.JointKeeper.Editor
         private bool _showKneeAdvanced;
         private bool _showTwistDiagnostics;
         private bool _showSceneHandles;
+        private bool _showBakedAssets;
 
         private SerializedProperty _targetMode;
         private SerializedProperty _targetRenderers;
@@ -51,12 +52,27 @@ namespace Dennokoworks.JointKeeper.Editor
 
             DrawStatusAndPlacementGuides(comp, avatarAnimator, avatarRoot);
 
+            if (comp.IsBaked)
+            {
+                EditorGUILayout.Space(4f);
+                if (DrawBakedStatusBox(comp))
+                {
+                    // コンポーネント削除時は即座に抜ける
+                    return;
+                }
+            }
+
             EditorGUILayout.Space(4f);
             DrawSimpleJointControls("肘 (Elbows)", _leftElbow, _rightElbow, _unlinkElbow);
             EditorGUILayout.Space(2f);
             DrawSimpleJointControls("膝 (Knees)", _leftKnee, _rightKnee, _unlinkKnee);
             EditorGUILayout.Space(4f);
-            DrawPreviewControls(avatarRoot);
+            if (!comp.IsBaked)
+            {
+                DrawPreviewControls(avatarRoot);
+                EditorGUILayout.Space(4f);
+                DrawBakeSection(comp);
+            }
 
             EditorGUILayout.Space(6f);
             _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "詳細設定 (Advanced)", true, EditorStyles.foldoutHeader);
@@ -137,11 +153,124 @@ namespace Dennokoworks.JointKeeper.Editor
         private void OnSceneGUI()
         {
             var comp = (JointKeeperComponent)target;
-            if (comp == null || !comp.enabled) return;
+            if (comp == null || (!comp.enabled && !comp.IsBaked)) return;
 
             Animator avatarAnimator = FindAvatarAnimator(comp.transform);
             Transform avatarRoot = avatarAnimator != null ? avatarAnimator.transform : comp.transform.root;
             JointKeeperSceneHandles.DrawSceneGUI(comp, avatarAnimator, avatarRoot, _showSceneHandles);
+        }
+
+        private bool DrawBakedStatusBox(JointKeeperComponent comp)
+        {
+            var rec = comp.bakeRecord;
+            int meshCount = rec?.renderers != null ? rec.renderers.Count : 0;
+            int helperCount = rec?.createdHelperBones != null ? rec.createdHelperBones.Count : 0;
+            int totalVerts = 0;
+            if (rec?.renderers != null)
+            {
+                for (int i = 0; i < rec.renderers.Count; i++)
+                    totalVerts += rec.renderers[i] != null ? rec.renderers[i].affectedVertexCount : 0;
+            }
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("ベイク済み (Baked)", EditorStyles.boldLabel);
+            string info = $"メッシュ {meshCount} 件を差し替え、補助ボーン {helperCount} 本を生成済みです（影響頂点計 {totalVerts}）。\n"
+                        + "NDMF ビルドでは自動スキップされます。スライダーを変更した場合は「再ベイク」を押してください。";
+            if (rec != null && rec.bakedWithScaleAdjuster)
+            {
+                info += "\n※ MA Scale Adjuster のスケールを反映してベイク済みです。Scale Adjuster を変更した場合は再ベイクしてください。";
+            }
+            EditorGUILayout.HelpBox(info, MessageType.Info);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("再ベイク (Re-Bake)"))
+            {
+                serializedObject.ApplyModifiedProperties();
+                var res = JointKeeperBaker.BakeComponent(comp);
+                if (!res.Success)
+                    EditorUtility.DisplayDialog("JointKeeper 再ベイク", res.Message, "OK");
+                serializedObject.Update();
+                SceneView.RepaintAll();
+            }
+            if (GUILayout.Button("元に戻す (Revert)"))
+            {
+                serializedObject.ApplyModifiedProperties();
+                JointKeeperBaker.RevertComponent(comp, deleteGeneratedAssets: true);
+                serializedObject.Update();
+                SceneView.RepaintAll();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (GUILayout.Button("コンポーネントを削除して確定 (Revert 不可)"))
+            {
+                bool ok = EditorUtility.DisplayDialog(
+                    "JointKeeper コンポーネント削除",
+                    "ベイク済みメッシュと補助ボーンを残したまま JointKeeperComponent を削除します。\n削除後は「元に戻す」が使えなくなります（Unity の Undo でのみ戻せます）。続行しますか？",
+                    "削除して確定",
+                    "キャンセル");
+                if (ok)
+                {
+                    JointKeeperBaker.FinalizeAndRemoveComponent(comp);
+                    return true;
+                }
+            }
+
+            _showBakedAssets = EditorGUILayout.Foldout(_showBakedAssets, "生成済みアセット・補助ボーン一覧", true);
+            if (_showBakedAssets && rec != null)
+            {
+                EditorGUI.indentLevel++;
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    if (rec.renderers != null)
+                    {
+                        for (int i = 0; i < rec.renderers.Count; i++)
+                        {
+                            var r = rec.renderers[i];
+                            if (r == null) continue;
+                            EditorGUILayout.ObjectField(
+                                r.renderer != null ? r.renderer.name : $"Mesh {i}",
+                                r.bakedMesh,
+                                typeof(Mesh),
+                                allowSceneObjects: false);
+                        }
+                    }
+                    if (rec.createdHelperBones != null)
+                    {
+                        for (int i = 0; i < rec.createdHelperBones.Count; i++)
+                        {
+                            var hb = rec.createdHelperBones[i];
+                            if (hb == null) continue;
+                            EditorGUILayout.ObjectField($"補助ボーン {i + 1}", hb, typeof(GameObject), allowSceneObjects: true);
+                        }
+                    }
+                }
+                EditorGUI.indentLevel--;
+            }
+
+            EditorGUILayout.EndVertical();
+            return false;
+        }
+
+        private void DrawBakeSection(JointKeeperComponent comp)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("破壊的ベイク (Bake & Replace)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                "他ツールとの競合回避や事前適用向け。元メッシュと同じフォルダに .asset を保存し、いつでも「元に戻す」できます。",
+                EditorStyles.wordWrappedMiniLabel);
+
+            if (GUILayout.Button("ベイクして差し替え (Bake & Replace)"))
+            {
+                serializedObject.ApplyModifiedProperties();
+                var res = JointKeeperBaker.BakeComponent(comp);
+                if (!res.Success)
+                {
+                    EditorUtility.DisplayDialog("JointKeeper ベイク", res.Message, "OK");
+                }
+                serializedObject.Update();
+                SceneView.RepaintAll();
+            }
+            EditorGUILayout.EndVertical();
         }
 
         private static void DrawStatusAndPlacementGuides(
@@ -159,7 +288,10 @@ namespace Dennokoworks.JointKeeper.Editor
                 return;
             }
 
-            var targets = CollectTargetRenderersPreview(comp, avatarRoot);
+            if (comp.IsBaked)
+                return;
+
+            var targets = JointKeeperTargetCollector.CollectTargets(comp, avatarRoot);
             if (targets.Count == 0)
             {
                 EditorGUILayout.HelpBox(
@@ -334,7 +466,8 @@ namespace Dennokoworks.JointKeeper.Editor
             }
 
             var ctx = AvatarKinematicContext.Build(avatarRoot.gameObject, avatarAnimator, humanoidBones);
-            var targets = CollectTargetRenderersPreview(comp, avatarRoot);
+            var aliasMap = PreviewBoneResolver.BuildAliasMap(avatarRoot.gameObject);
+            var targets = JointKeeperTargetCollector.CollectTargets(comp, avatarRoot);
             if (targets.Count == 0)
             {
                 EditorGUILayout.LabelField("対象メッシュがありません。");
@@ -357,7 +490,8 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (upper == null || lower == null) continue;
 
                 var groups = TwistBoneClassifier.Classify(
-                    jointId, upper, lower, child, sampleSmr.bones, cfg, ctx);
+                    jointId, upper, lower, child, sampleSmr.bones, cfg, ctx,
+                    boneAliasMap: aliasMap);
 
                 string pSrc = groups.ProximalSource != null ? groups.ProximalSource.name : "None";
                 string dSrc = groups.DistalSource != null ? groups.DistalSource.name : "None";
@@ -386,44 +520,6 @@ namespace Dennokoworks.JointKeeper.Editor
                 cur = cur.parent;
             }
             return found;
-        }
-
-        private static List<SkinnedMeshRenderer> CollectTargetRenderersPreview(
-            JointKeeperComponent comp,
-            Transform avatarRoot)
-        {
-            var result = new List<SkinnedMeshRenderer>();
-            if (comp == null) return result;
-
-            if (comp.targetMode == TargetRendererMode.ManualList)
-            {
-                if (comp.targetRenderers != null)
-                {
-                    foreach (var smr in comp.targetRenderers)
-                    {
-                        if (smr != null && (avatarRoot == null || smr.transform.IsChildOf(avatarRoot)))
-                            result.Add(smr);
-                    }
-                }
-                return result;
-            }
-
-            var excluded = new HashSet<SkinnedMeshRenderer>();
-            if (comp.excludedRenderers != null)
-            {
-                foreach (var ex in comp.excludedRenderers)
-                {
-                    if (ex != null) excluded.Add(ex);
-                }
-            }
-
-            var found = comp.GetComponentsInChildren<SkinnedMeshRenderer>(true);
-            for (int i = 0; i < found.Length; i++)
-            {
-                if (found[i] != null && !excluded.Contains(found[i]))
-                    result.Add(found[i]);
-            }
-            return result;
         }
     }
 }

@@ -6,12 +6,22 @@ using UnityEngine;
 namespace Dennokoworks.JointKeeper.Editor
 {
     /// <summary>
-    /// Edit モード（MA Merge Armature 実行前）において、衣装ボーンとアバターボーンの対応付けを解決する (§7.3)。
-    /// Modular Avatar へのアセンブリ依存を持たずにリフレクションで ModularAvatarMergeArmature を読み取る。
+    /// Edit モード（MA Merge Armature / Scale Adjuster 実行前）において、
+    /// 衣装ボーンとアバターボーンの対応付けおよび Scale Adjuster 値を解決する (§7.3・破壊的ベイク共用)。
+    /// Modular Avatar へのアセンブリ依存を持たずにリフレクションで読み取る。
     /// </summary>
     internal static class PreviewBoneResolver
     {
         private const string MergeArmatureTypeName = "nadena.dev.modular_avatar.core.ModularAvatarMergeArmature";
+        private const string ScaleAdjusterTypeName = "nadena.dev.modular_avatar.core.ModularAvatarScaleAdjuster";
+
+        internal sealed class MergeArmatureMapping
+        {
+            public Transform OutfitArmatureRoot;
+            public Transform AvatarTargetRoot;
+            public readonly Dictionary<Transform, Transform> OutfitToAvatar = new Dictionary<Transform, Transform>();
+            public readonly Dictionary<Transform, Transform> AvatarToOutfit = new Dictionary<Transform, Transform>();
+        }
 
         /// <summary>
         /// アバター配下の全 ModularAvatarMergeArmature を解析し、
@@ -20,7 +30,23 @@ namespace Dennokoworks.JointKeeper.Editor
         public static Dictionary<Transform, Transform> BuildAliasMap(GameObject avatarRoot)
         {
             var aliasMap = new Dictionary<Transform, Transform>();
-            if (avatarRoot == null) return aliasMap;
+            var mappings = BuildMergeArmatureMappings(avatarRoot);
+            for (int i = 0; i < mappings.Count; i++)
+            {
+                foreach (var kv in mappings[i].OutfitToAvatar)
+                    aliasMap[kv.Key] = kv.Value;
+            }
+            return aliasMap;
+        }
+
+        /// <summary>
+        /// ModularAvatarMergeArmature ごとの双方向マッピング一覧を構築する。
+        /// 破壊的ベイク時に衣装側の Armature ボーンを直接特定するために使用する。
+        /// </summary>
+        public static List<MergeArmatureMapping> BuildMergeArmatureMappings(GameObject avatarRoot)
+        {
+            var result = new List<MergeArmatureMapping>();
+            if (avatarRoot == null) return result;
 
             var allComponents = avatarRoot.GetComponentsInChildren<Component>(true);
             for (int i = 0; i < allComponents.Length; i++)
@@ -31,23 +57,137 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (!string.Equals(t.FullName, MergeArmatureTypeName, StringComparison.Ordinal))
                     continue;
 
-                TryResolveMergeArmature(c, t, aliasMap);
+                var mapping = TryBuildMapping(c, t);
+                if (mapping != null && mapping.OutfitToAvatar.Count > 0)
+                    result.Add(mapping);
             }
 
-            return aliasMap;
+            return result;
         }
 
-        private static void TryResolveMergeArmature(Component comp, Type type, Dictionary<Transform, Transform> aliasMap)
+        /// <summary>
+        /// 指定 SMR のスキニングボーンがどの MergeArmature 配下に属するか判定し、
+        /// 該当すれば衣装側の (upper, lower, child) を返す。該当しなければアバター側をそのまま返す。
+        /// </summary>
+        public static bool TryResolveOutfitJointBones(
+            Transform[] smrBones,
+            List<MergeArmatureMapping> mappings,
+            Transform avatarUpper,
+            Transform avatarLower,
+            Transform avatarChild,
+            out Transform targetUpper,
+            out Transform targetLower,
+            out Transform targetChild)
         {
-            // mergeTarget (AvatarObjectReference) / prefix (string) / suffix (string)
+            targetUpper = avatarUpper;
+            targetLower = avatarLower;
+            targetChild = avatarChild;
+
+            if (smrBones == null || smrBones.Length == 0 || mappings == null || mappings.Count == 0
+                || avatarUpper == null || avatarLower == null)
+            {
+                return false;
+            }
+
+            MergeArmatureMapping bestMapping = null;
+            int bestHits = 0;
+
+            for (int m = 0; m < mappings.Count; m++)
+            {
+                var mapping = mappings[m];
+                if (!mapping.AvatarToOutfit.ContainsKey(avatarUpper) || !mapping.AvatarToOutfit.ContainsKey(avatarLower))
+                    continue;
+
+                int hits = 0;
+                for (int b = 0; b < smrBones.Length; b++)
+                {
+                    Transform bone = smrBones[b];
+                    if (bone == null) continue;
+                    if (mapping.OutfitToAvatar.ContainsKey(bone) || bone.IsChildOf(mapping.OutfitArmatureRoot))
+                        hits++;
+                }
+
+                if (hits > bestHits)
+                {
+                    bestHits = hits;
+                    bestMapping = mapping;
+                }
+            }
+
+            if (bestMapping == null || bestHits == 0)
+                return false;
+
+            targetUpper = bestMapping.AvatarToOutfit[avatarUpper];
+            targetLower = bestMapping.AvatarToOutfit[avatarLower];
+            targetChild = (avatarChild != null && bestMapping.AvatarToOutfit.TryGetValue(avatarChild, out var oc))
+                ? oc
+                : null;
+            return targetUpper != null && targetLower != null;
+        }
+
+        /// <summary>
+        /// 指定ボーン配列に ModularAvatarScaleAdjuster が付与されていれば、その非 (1,1,1) スケールを収集する。
+        /// </summary>
+        public static Dictionary<Transform, Vector3> CollectScaleAdjusterScales(Transform[] bones)
+        {
+            var result = new Dictionary<Transform, Vector3>();
+            if (bones == null) return result;
+
+            for (int i = 0; i < bones.Length; i++)
+            {
+                Transform b = bones[i];
+                if (b == null || result.ContainsKey(b)) continue;
+
+                if (TryGetScaleAdjusterScale(b, out Vector3 scale)
+                    && (scale - Vector3.one).sqrMagnitude > 1e-8f)
+                {
+                    result[b] = scale;
+                }
+            }
+            return result;
+        }
+
+        public static bool TryGetScaleAdjusterScale(Transform bone, out Vector3 scale)
+        {
+            scale = Vector3.one;
+            if (bone == null) return false;
+
+            var comps = bone.GetComponents<Component>();
+            for (int i = 0; i < comps.Length; i++)
+            {
+                Component c = comps[i];
+                if (c == null) continue;
+                Type t = c.GetType();
+                if (!string.Equals(t.FullName, ScaleAdjusterTypeName, StringComparison.Ordinal))
+                    continue;
+
+                object val = GetFieldOrProperty(c, t, "Scale") ?? GetFieldOrProperty(c, t, "m_Scale");
+                if (val is Vector3 v)
+                {
+                    scale = v;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static MergeArmatureMapping TryBuildMapping(Component comp, Type type)
+        {
             object mergeTargetRef = GetFieldOrProperty(comp, type, "mergeTarget");
             GameObject targetGo = ResolveAvatarObjectReference(mergeTargetRef, comp);
-            if (targetGo == null) return;
+            if (targetGo == null) return null;
 
             string prefix = GetFieldOrProperty(comp, type, "prefix") as string ?? string.Empty;
             string suffix = GetFieldOrProperty(comp, type, "suffix") as string ?? string.Empty;
 
-            MapRecursive(comp.transform, targetGo.transform, prefix, suffix, aliasMap);
+            var mapping = new MergeArmatureMapping
+            {
+                OutfitArmatureRoot = comp.transform,
+                AvatarTargetRoot = targetGo.transform,
+            };
+
+            MapRecursive(comp.transform, targetGo.transform, prefix, suffix, mapping);
+            return mapping;
         }
 
         private static void MapRecursive(
@@ -55,10 +195,12 @@ namespace Dennokoworks.JointKeeper.Editor
             Transform avatarNode,
             string prefix,
             string suffix,
-            Dictionary<Transform, Transform> aliasMap)
+            MergeArmatureMapping mapping)
         {
             if (outfitNode == null || avatarNode == null) return;
-            aliasMap[outfitNode] = avatarNode;
+            mapping.OutfitToAvatar[outfitNode] = avatarNode;
+            if (!mapping.AvatarToOutfit.ContainsKey(avatarNode))
+                mapping.AvatarToOutfit[avatarNode] = outfitNode;
 
             for (int i = 0; i < outfitNode.childCount; i++)
             {
@@ -67,7 +209,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 Transform avatarChild = avatarNode.Find(baseName);
                 if (avatarChild != null)
                 {
-                    MapRecursive(outfitChild, avatarChild, prefix, suffix, aliasMap);
+                    MapRecursive(outfitChild, avatarChild, prefix, suffix, mapping);
                 }
             }
         }
