@@ -51,11 +51,16 @@ namespace Dennokoworks.JointKeeper.Editor
         /// 指定した全関節の実測ヒンジ軸をまとめて取得する。
         /// 測定できない関節は辞書に含めない（フォールバックへ委ねる）。
         /// </summary>
-        public static Dictionary<JointId, Vector3> SampleAll(Animator animator)
+        public static Dictionary<JointId, Vector3> SampleAll(
+            Animator animator,
+            Dictionary<HumanBodyBones, Transform> humanoidBones = null)
         {
             var result = new Dictionary<JointId, Vector3>();
             if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
                 return result;
+
+            if (humanoidBones == null)
+                humanoidBones = HumanoidBoneResolver.ResolveAll(animator, out _);
 
             var allTransforms = animator.transform.GetComponentsInChildren<Transform>(true);
             var snapshots = new TransformSnapshot[allTransforms.Length];
@@ -74,7 +79,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 var joints = new[] { JointId.LeftElbow, JointId.RightElbow, JointId.LeftKnee, JointId.RightKnee };
                 foreach (var jointId in joints)
                 {
-                    if (TrySampleSingle(animator, handler, basePose, jointId, out var axis))
+                    if (TrySampleSingle(humanoidBones, handler, basePose, jointId, out var axis))
                     {
                         result[jointId] = axis;
                     }
@@ -95,7 +100,7 @@ namespace Dennokoworks.JointKeeper.Editor
         }
 
         private static bool TrySampleSingle(
-            Animator animator,
+            Dictionary<HumanBodyBones, Transform> humanoidBones,
             HumanPoseHandler handler,
             HumanPose basePose,
             JointId jointId,
@@ -106,8 +111,8 @@ namespace Dennokoworks.JointKeeper.Editor
             if (muscleIdx < 0 || muscleIdx >= basePose.muscles.Length)
                 return false;
 
-            Transform upper = animator.GetBoneTransform(jointId.GetUpperHumanoidBone());
-            Transform lower = animator.GetBoneTransform(jointId.GetLowerHumanoidBone());
+            Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+            Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
             if (upper == null || lower == null)
                 return false;
 

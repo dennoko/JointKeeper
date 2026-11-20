@@ -26,10 +26,14 @@ namespace Dennokoworks.JointKeeper.Editor
 
         public static void DrawSceneGUI(JointKeeperComponent comp, Animator animator, Transform avatarRoot, bool showHandles)
         {
-            if (comp == null || animator == null || !animator.isHuman)
+            if (comp == null || animator == null)
                 return;
 
-            Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, avatarRoot, out _);
+            var humanoidBones = HumanoidBoneResolver.ResolveAll(animator, out _);
+            if (humanoidBones.Count == 0)
+                return;
+
+            Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, avatarRoot, out _, humanoidBones);
             Vector3 avatarUp = avatarRoot != null ? avatarRoot.up : Vector3.up;
 
             foreach (var jointId in AllJoints)
@@ -37,9 +41,9 @@ namespace Dennokoworks.JointKeeper.Editor
                 JointConfig resolved = comp.ResolveConfig(jointId);
                 if (!resolved.enabled) continue;
 
-                Transform upper = animator.GetBoneTransform(jointId.GetUpperHumanoidBone());
-                Transform lower = animator.GetBoneTransform(jointId.GetLowerHumanoidBone());
-                Transform child = animator.GetBoneTransform(jointId.GetChildHumanoidBone());
+                Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+                Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
+                Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null) continue;
 
                 Vector3? childPos = child != null ? child.position : (Vector3?)null;

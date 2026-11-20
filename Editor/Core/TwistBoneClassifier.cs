@@ -34,19 +34,22 @@ namespace Dennokoworks.JointKeeper.Editor
             new Dictionary<Transform, List<ConstraintInfo>>();
         public readonly HashSet<Transform> AllHumanoidBones = new HashSet<Transform>();
 
-        public static AvatarKinematicContext Build(GameObject avatarRoot, Animator animator)
+        public static AvatarKinematicContext Build(
+            GameObject avatarRoot,
+            Animator animator,
+            Dictionary<HumanBodyBones, Transform> humanoidBones = null)
         {
             var ctx = new AvatarKinematicContext();
             if (avatarRoot == null) return ctx;
 
-            // 1. 全 Humanoid ボーン収集
-            if (animator != null && animator.isHuman)
+            // 1. 全 Humanoid ボーン収集（RebindHumanoidAvatarPass 直後の GetBoneTransform==null 回避）
+            var resolvedBones = humanoidBones ?? (animator != null ? HumanoidBoneResolver.ResolveAll(animator, out _) : null);
+            if (resolvedBones != null)
             {
-                for (int i = 0; i < (int)HumanBodyBones.LastBone; i++)
+                foreach (var kv in resolvedBones)
                 {
-                    var bone = animator.GetBoneTransform((HumanBodyBones)i);
-                    if (bone != null)
-                        ctx.AllHumanoidBones.Add(bone);
+                    if (kv.Value != null)
+                        ctx.AllHumanoidBones.Add(kv.Value);
                 }
             }
 

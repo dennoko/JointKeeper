@@ -149,7 +149,9 @@ namespace Dennokoworks.JointKeeper.Editor
             Animator avatarAnimator,
             Transform avatarRoot)
         {
-            if (avatarAnimator == null || !avatarAnimator.isHuman)
+            bool isHumanoid = avatarAnimator != null
+                && (avatarAnimator.isHuman || (avatarAnimator.avatar != null && avatarAnimator.avatar.isValid && avatarAnimator.avatar.isHuman));
+            if (!isHumanoid)
             {
                 EditorGUILayout.HelpBox(
                     "親階層に Humanoid Animator が見つかりません。VRChat アバター配下の衣装オブジェクトにアタッチしてください。",
@@ -318,13 +320,20 @@ namespace Dennokoworks.JointKeeper.Editor
             _showTwistDiagnostics = EditorGUILayout.Foldout(_showTwistDiagnostics, "ツイストボーン検出・診断", true);
             if (!_showTwistDiagnostics) return;
 
-            if (avatarAnimator == null || !avatarAnimator.isHuman)
+            if (avatarAnimator == null)
             {
                 EditorGUILayout.HelpBox("Humanoid Animator が見つかりません。", MessageType.Info);
                 return;
             }
 
-            var ctx = AvatarKinematicContext.Build(avatarRoot.gameObject, avatarAnimator);
+            var humanoidBones = HumanoidBoneResolver.ResolveAll(avatarAnimator, out _);
+            if (humanoidBones.Count == 0)
+            {
+                EditorGUILayout.HelpBox("Humanoid ボーンを解決できませんでした。", MessageType.Info);
+                return;
+            }
+
+            var ctx = AvatarKinematicContext.Build(avatarRoot.gameObject, avatarAnimator, humanoidBones);
             var targets = CollectTargetRenderersPreview(comp, avatarRoot);
             if (targets.Count == 0)
             {
@@ -342,9 +351,9 @@ namespace Dennokoworks.JointKeeper.Editor
                 JointConfig cfg = comp.ResolveConfig(jointId);
                 if (!cfg.enabled) continue;
 
-                Transform upper = avatarAnimator.GetBoneTransform(jointId.GetUpperHumanoidBone());
-                Transform lower = avatarAnimator.GetBoneTransform(jointId.GetLowerHumanoidBone());
-                Transform child = avatarAnimator.GetBoneTransform(jointId.GetChildHumanoidBone());
+                Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+                Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
+                Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null) continue;
 
                 var groups = TwistBoneClassifier.Classify(
@@ -372,7 +381,7 @@ namespace Dennokoworks.JointKeeper.Editor
             while (cur != null)
             {
                 var anim = cur.GetComponent<Animator>();
-                if (anim != null && anim.isHuman)
+                if (anim != null && (anim.isHuman || (anim.avatar != null && anim.avatar.isValid && anim.avatar.isHuman)))
                     found = anim;
                 cur = cur.parent;
             }

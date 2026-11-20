@@ -42,7 +42,7 @@ namespace Dennokoworks.JointKeeper.Editor
 
         public JointKeeperPreviewPose(
             GameObject avatarRoot,
-            Animator animator,
+            Dictionary<HumanBodyBones, Transform> humanoidBones,
             Dictionary<JointId, JointFrame> baseFrames,
             Dictionary<Transform, Transform> outfitAliasMap)
         {
@@ -60,11 +60,11 @@ namespace Dennokoworks.JointKeeper.Editor
 
             CloneHierarchy(avatarRoot.transform, _shadowRoot.transform);
 
-            if (animator != null && animator.isHuman && baseFrames != null)
+            if (humanoidBones != null && baseFrames != null)
             {
                 foreach (var kv in baseFrames)
                 {
-                    Transform lowerOrig = animator.GetBoneTransform(kv.Key.GetLowerHumanoidBone());
+                    Transform lowerOrig = HumanoidBoneResolver.GetBone(humanoidBones, kv.Key.GetLowerHumanoidBone());
                     if (lowerOrig == null || !_origToShadow.TryGetValue(lowerOrig, out Transform lowerShadow))
                         continue;
 

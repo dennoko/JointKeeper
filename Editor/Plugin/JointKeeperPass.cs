@@ -54,18 +54,27 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (animator == null)
                     animator = context.AvatarRootObject.GetComponentInChildren<Animator>(true);
 
-                if (animator == null || !animator.isHuman)
+                bool isHumanoid = animator != null
+                    && (animator.isHuman || (animator.avatar != null && animator.avatar.isValid && animator.avatar.isHuman));
+                if (!isHumanoid)
                 {
                     Debug.LogWarning("[JointKeeper] Humanoid Animator が見つからないため処理をスキップしました。", context.AvatarRootObject);
                     return;
                 }
 
+                // 1b. Humanoid ボーン解決（MA RebindHumanoidAvatarPass 直後や非アクティブ時の GetBoneTransform==null 対策）
+                var humanoidBones = HumanoidBoneResolver.ResolveAll(animator, out bool usedFallback);
+                if (usedFallback)
+                {
+                    Debug.Log($"[JointKeeper] Avatar.humanDescription から Humanoid ボーン ({humanoidBones.Count} 本) を解決しました。", context.AvatarRootObject);
+                }
+
                 // 2. アバター全体の PhysBone / Constraint 依存グラフを 1 回構築
-                var kinematicCtx = AvatarKinematicContext.Build(context.AvatarRootObject, animator);
+                var kinematicCtx = AvatarKinematicContext.Build(context.AvatarRootObject, animator, humanoidBones);
 
                 // 2b. 関節ごとのベース JointFrame を 1 回だけ算出 (ADR-06)
-                var measuredAxes = HingeAxisSampler.SampleAll(animator);
-                Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, context.AvatarRootTransform, out string fwdWarning);
+                var measuredAxes = HingeAxisSampler.SampleAll(animator, humanoidBones);
+                Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, context.AvatarRootTransform, out string fwdWarning, humanoidBones);
                 if (!string.IsNullOrEmpty(fwdWarning))
                     Debug.LogWarning($"[JointKeeper] {fwdWarning}", context.AvatarRootObject);
                 Vector3 avatarUp = context.AvatarRootTransform.up;
@@ -73,9 +82,9 @@ namespace Dennokoworks.JointKeeper.Editor
                 var baseFrames = new Dictionary<JointId, JointFrame>();
                 foreach (var jointId in AllJoints)
                 {
-                    Transform upper = animator.GetBoneTransform(jointId.GetUpperHumanoidBone());
-                    Transform lower = animator.GetBoneTransform(jointId.GetLowerHumanoidBone());
-                    Transform child = animator.GetBoneTransform(jointId.GetChildHumanoidBone());
+                    Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+                    Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
+                    Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                     if (upper == null || lower == null) continue;
 
                     Vector3? childPos = child != null ? child.position : (Vector3?)null;
@@ -84,6 +93,12 @@ namespace Dennokoworks.JointKeeper.Editor
                     baseFrames[jointId] = JointFrameSolver.Solve(
                         jointId, upper.position, lower.position, childPos,
                         avatarForward, avatarUp, measured);
+                }
+
+                if (baseFrames.Count == 0)
+                {
+                    Debug.LogWarning("[JointKeeper] 肘・膝の Humanoid ボーンを 1 つも解決できなかったため処理をスキップしました。", context.AvatarRootObject);
+                    return;
                 }
 
                 // 3. 所有権解決 (ADR-04, §4.3)
@@ -104,11 +119,22 @@ namespace Dennokoworks.JointKeeper.Editor
                 }
 
                 var buildState = context.GetState<JointKeeperBuildState>();
+                int modifiedSmrCount = 0;
+                int totalAffectedVerts = 0;
 
                 foreach (var smrEntry in bySmr)
                 {
-                    ProcessRenderer(smrEntry.Key, smrEntry.Value, animator, kinematicCtx, baseFrames, buildState);
+                    int affected = ProcessRenderer(context, smrEntry.Key, smrEntry.Value, humanoidBones, kinematicCtx, baseFrames, buildState);
+                    if (affected > 0)
+                    {
+                        modifiedSmrCount++;
+                        totalAffectedVerts += affected;
+                    }
                 }
+
+                Debug.Log(
+                    $"[JointKeeper] ビルド適用完了: 対象 SMR {bySmr.Count} 件中 {modifiedSmrCount} 件を更新, 生成補助ボーン {buildState.CreatedBoneCount} 本, 影響頂点計 {totalAffectedVerts}",
+                    context.AvatarRootObject);
             }
             finally
             {
@@ -121,16 +147,17 @@ namespace Dennokoworks.JointKeeper.Editor
             }
         }
 
-        private static void ProcessRenderer(
+        private static int ProcessRenderer(
+            BuildContext context,
             SkinnedMeshRenderer smr,
             List<(JointId jointId, OwnedAssignment assignment)> assignments,
-            Animator animator,
+            Dictionary<HumanBodyBones, Transform> humanoidBones,
             AvatarKinematicContext kinematicCtx,
             Dictionary<JointId, JointFrame> baseFrames,
             JointKeeperBuildState buildState)
         {
             if (smr == null || smr.sharedMesh == null)
-                return;
+                return 0;
 
             Mesh origMesh = smr.sharedMesh;
             Transform[] origBones = smr.bones;
@@ -141,7 +168,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 || origBindposes == null || origBindposes.Length == 0
                 || origWeights == null || origWeights.Length == 0)
             {
-                return;
+                return 0;
             }
 
             // 5 本以上インフルエンスの検出ログ (§4.2)
@@ -173,6 +200,7 @@ namespace Dennokoworks.JointKeeper.Editor
             var workingBindposes = new List<Matrix4x4>(origBindposes);
             BoneWeight[] workingWeights = (BoneWeight[])origWeights.Clone();
             bool anyModified = false;
+            int smrAffectedVerts = 0;
 
             assignments.Sort((a, b) => a.jointId.CompareTo(b.jointId));
 
@@ -182,9 +210,9 @@ namespace Dennokoworks.JointKeeper.Editor
                     continue;
 
                 JointConfig cfg = owned.Config;
-                Transform upper = animator.GetBoneTransform(jointId.GetUpperHumanoidBone());
-                Transform lower = animator.GetBoneTransform(jointId.GetLowerHumanoidBone());
-                Transform child = animator.GetBoneTransform(jointId.GetChildHumanoidBone());
+                Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+                Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
+                Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null)
                     continue;
 
@@ -200,7 +228,10 @@ namespace Dennokoworks.JointKeeper.Editor
                     Debug.LogWarning($"[JointKeeper] {w}", smr);
 
                 if (groups.ProximalBoneIndices.Count == 0 || groups.DistalBoneIndices.Count == 0)
+                {
+                    Debug.Log($"[JointKeeper] '{smr.name}' ({jointId}) スキップ: G_P={groups.ProximalBoneIndices.Count}, G_D={groups.DistalBoneIndices.Count}", smr);
                     continue;
+                }
                 if (groups.ProximalReferenceBoneIndex < 0 || groups.DistalReferenceBoneIndex < 0)
                     continue;
 
@@ -217,7 +248,10 @@ namespace Dennokoworks.JointKeeper.Editor
                     in redParams);
 
                 if (redResult.Stats.AffectedVertices == 0)
+                {
+                    Debug.Log($"[JointKeeper] '{smr.name}' ({jointId}) スキップ: 影響頂点 0 (G_P={groups.ProximalBoneIndices.Count}, G_D={groups.DistalBoneIndices.Count})", smr);
                     continue;
+                }
 
                 // 5d. 遅延生成・共有レジストリ照会 (ADR-02, ADR-03)
                 var rigKey = new RigSignatureKey(
@@ -249,6 +283,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 workingBindposes.Add(helperBindpose);
                 workingWeights = redResult.NewWeights;
                 anyModified = true;
+                smrAffectedVerts += redResult.Stats.AffectedVertices;
 
                 // 5f. レスト姿勢ズレ検証
                 Vector3[] newWorldVerts = SkinningEvaluator.EvaluateWorldVerticesCpu(
@@ -263,7 +298,7 @@ namespace Dennokoworks.JointKeeper.Editor
             }
 
             if (!anyModified)
-                return;
+                return 0;
 
             // 6. 複製メッシュへ書き込み（bindposes → boneWeights → smr.bones の順序を厳守）
             Mesh clonedMesh = Object.Instantiate(origMesh);
@@ -274,6 +309,8 @@ namespace Dennokoworks.JointKeeper.Editor
             smr.bones = workingBones.ToArray();
             smr.sharedMesh = clonedMesh;
             ObjectRegistry.RegisterReplacedObject(origMesh, clonedMesh);
+            context.AssetSaver.SaveAsset(clonedMesh);
+            return smrAffectedVerts;
         }
 
         private static Dictionary<(SkinnedMeshRenderer smr, JointId jointId), OwnedAssignment> ResolveOwnership(

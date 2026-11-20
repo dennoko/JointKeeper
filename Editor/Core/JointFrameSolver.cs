@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using Dennokoworks.JointKeeper;
 
@@ -15,19 +16,26 @@ namespace Dennokoworks.JointKeeper.Editor
         /// アバター基準前方ベクトル F_av を Humanoid 骨格から算出する。
         /// 取得不可・異常時は avatarRoot.forward へフォールバック。
         /// </summary>
-        public static Vector3 ComputeAvatarForward(Animator animator, Transform avatarRoot, out string warning)
+        public static Vector3 ComputeAvatarForward(
+            Animator animator,
+            Transform avatarRoot,
+            out string warning,
+            Dictionary<HumanBodyBones, Transform> humanoidBones = null)
         {
             warning = null;
             Vector3 rootForward = avatarRoot != null ? avatarRoot.forward.normalized : Vector3.forward;
-            if (animator == null)
+            if (animator == null && humanoidBones == null)
                 return rootForward;
 
-            Transform leftLeg = animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg);
-            Transform rightLeg = animator.GetBoneTransform(HumanBodyBones.RightUpperLeg);
-            Transform hips = animator.GetBoneTransform(HumanBodyBones.Hips);
-            Transform spine = animator.GetBoneTransform(HumanBodyBones.Spine);
+            if (humanoidBones == null)
+                humanoidBones = HumanoidBoneResolver.ResolveAll(animator, out _);
+
+            Transform leftLeg = HumanoidBoneResolver.GetBone(humanoidBones, HumanBodyBones.LeftUpperLeg);
+            Transform rightLeg = HumanoidBoneResolver.GetBone(humanoidBones, HumanBodyBones.RightUpperLeg);
+            Transform hips = HumanoidBoneResolver.GetBone(humanoidBones, HumanBodyBones.Hips);
+            Transform spine = HumanoidBoneResolver.GetBone(humanoidBones, HumanBodyBones.Spine);
             if (spine == null)
-                spine = animator.GetBoneTransform(HumanBodyBones.Chest);
+                spine = HumanoidBoneResolver.GetBone(humanoidBones, HumanBodyBones.Chest);
 
             if (leftLeg == null || rightLeg == null || hips == null || spine == null)
                 return rootForward;

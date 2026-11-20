@@ -121,7 +121,10 @@ namespace Dennokoworks.JointKeeper.Editor
 
             var animator = avatarRoot.GetComponent<Animator>();
             if (animator == null) animator = avatarRoot.GetComponentInChildren<Animator>(true);
-            if (animator == null || !animator.isHuman) return;
+            if (animator == null) return;
+
+            var humanoidBones = HumanoidBoneResolver.ResolveAll(animator, out _);
+            if (humanoidBones.Count == 0) return;
 
             var allComps = avatarRoot.GetComponentsInChildren<JointKeeperComponent>(true);
             var enabledComps = new List<JointKeeperComponent>();
@@ -137,18 +140,18 @@ namespace Dennokoworks.JointKeeper.Editor
 
             // Edit モード用 MA Merge Armature ボーン対応付け (§7.3)
             var aliasMap = PreviewBoneResolver.BuildAliasMap(avatarRoot);
-            var kinematicCtx = AvatarKinematicContext.Build(avatarRoot, animator);
+            var kinematicCtx = AvatarKinematicContext.Build(avatarRoot, animator, humanoidBones);
             var measuredAxes = JointKeeperPreviewState.GetCachedMeasuredAxes(avatarRoot);
 
-            Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, avatarRoot.transform, out _);
+            Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, avatarRoot.transform, out _, humanoidBones);
             Vector3 avatarUp = avatarRoot.transform.up;
 
             var baseFrames = new Dictionary<JointId, JointFrame>();
             foreach (var jointId in AllJoints)
             {
-                Transform upper = animator.GetBoneTransform(jointId.GetUpperHumanoidBone());
-                Transform lower = animator.GetBoneTransform(jointId.GetLowerHumanoidBone());
-                Transform child = animator.GetBoneTransform(jointId.GetChildHumanoidBone());
+                Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+                Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
+                Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null) continue;
 
                 Vector3? childPos = child != null ? child.position : (Vector3?)null;
@@ -157,7 +160,7 @@ namespace Dennokoworks.JointKeeper.Editor
                     jointId, upper.position, lower.position, childPos, avatarForward, avatarUp, measured);
             }
 
-            _pose = new JointKeeperPreviewPose(avatarRoot, animator, baseFrames, aliasMap);
+            _pose = new JointKeeperPreviewPose(avatarRoot, humanoidBones, baseFrames, aliasMap);
             _heatmapMaterial = JointKeeperHeatmapDrawer.CreateHeatmapMaterial();
 
             // SMR ごとの適用設定を解決
@@ -169,7 +172,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (smr == null || smr.sharedMesh == null || smr.bones == null || smr.bones.Length == 0)
                     continue;
 
-                var data = BuildRendererPreviewData(smr, ownership, animator, kinematicCtx, baseFrames, aliasMap);
+                var data = BuildRendererPreviewData(smr, ownership, humanoidBones, kinematicCtx, baseFrames, aliasMap);
                 _dataByOriginal[orig] = data;
             }
         }
@@ -177,7 +180,7 @@ namespace Dennokoworks.JointKeeper.Editor
         private RendererPreviewData BuildRendererPreviewData(
             SkinnedMeshRenderer smr,
             Dictionary<(SkinnedMeshRenderer, JointId), JointConfig> ownership,
-            Animator animator,
+            Dictionary<HumanBodyBones, Transform> humanoidBones,
             AvatarKinematicContext kinematicCtx,
             Dictionary<JointId, JointFrame> baseFrames,
             Dictionary<Transform, Transform> aliasMap)
@@ -207,9 +210,9 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (!baseFrames.TryGetValue(jointId, out JointFrame baseFrame))
                     continue;
 
-                Transform upper = animator.GetBoneTransform(jointId.GetUpperHumanoidBone());
-                Transform lower = animator.GetBoneTransform(jointId.GetLowerHumanoidBone());
-                Transform child = animator.GetBoneTransform(jointId.GetChildHumanoidBone());
+                Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+                Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
+                Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null) continue;
 
                 JointFrame frame = baseFrame.WithOffsets(cfg.pivotOffset, cfg.outwardAngleOffset);
