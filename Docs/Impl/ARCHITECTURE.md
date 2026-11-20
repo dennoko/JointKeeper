@@ -100,10 +100,12 @@ Assets/dennokoworks/JointKeeper/
 │   │   ├── WeightRedistributionInput.cs# 純粋計算用入力・出力・統計 struct
 │   │   └── WeightRedistributor.cs      # 角モーメント保存分配＋4段階スロット統合
 │   └── UI/
-│       ├── JointKeeperEditor.cs        # CustomEditor (Inspector UI・診断表示)
+│       ├── JointKeeperMenu.cs          # ヒエラルキー右クリックメニュー (GameObject/dennokoworks/JointKeeper)
+│       ├── JointKeeperEditor.cs        # CustomEditor (段階的開示 Inspector UI・診断表示)
 │       ├── JointKeeperSceneHandles.cs  # Phase 2: ギズモ・楕円体ROI・外側方向ハンドル
 │       ├── JointKeeperRenderFilter.cs  # Phase 2: NDMF IRenderFilter (ウェイト差し替え・影ボーン曲げ) (ADR-08)
 │       ├── JointKeeperPreviewPose.cs   # Phase 2: 非保存の影ボーン階層・曲げ/ツイスト適用・RigMath による補助ボーン評価
+│       ├── PreviewBoneResolver.cs      # Phase 2: Edit モードでの MA MergeArmature ボーン対応付け
 │       └── JointKeeperHeatmapDrawer.cs # Phase 2: ウェイト／4ボーン診断ヒートマップ描画
 └── Tests/
     └── Editor/
@@ -756,22 +758,33 @@ internal struct RedistributionStats
 
 ## 7. Editor UI・Phase 2 プレビュー設計
 
-### 7.1 Inspector UI（`JointKeeperEditor`）
+### 7.1 ヒエラルキーメニューと Inspector UI（`JointKeeperMenu` / `JointKeeperEditor`）
 
-- **セクション構成:**
-  1. **ターゲット設定:** `AutoDetect` / `ManualList` 切替、対象・除外 `SkinnedMeshRenderer` リスト
-  2. **肘（Elbows） / 膝（Knees）設定パネル:**
-     - 左右リンク切替トグル（既定 ON）
-     - 基本スライダー（強度 `strength`・90°押し出し量 `pushAt90Deg`・追従率 `bendFollowRatio`）
-     - 範囲・非対称フィルタ（軸/径方向半径・内側カットオフ）
-     - 折りたたみ「ツイストボーン・詳細設定」：自動検出された $G_P / G_D$ ボーン一覧の読み取り専用表示（依存理由・Constraint 駆動か否かを併記）、既存肘補助ボーン警告ボックス、手動 Override リスト、4 ボーン統合閾値
-     - 関節フレームの算出元（`Measured` / `RestBend` / `Prior`）表示と「関節フレーム再計算」ボタン（§7.3）
-  3. **Phase 2 プレビュー操作バー:**
-     - プレビュー ON/OFF トグル
-     - **曲げ角スライダー（0°〜150°）**
-     - **前腕ツイスト角スライダー（-90°〜+90°）**（肘選択時）
-     - **Before / After 比較トグル**
-     - **ヒートマップ表示切替**（Off / 補助ウェイト分布 / 4 ボーン統合診断）
+基本体験は **「ヒエラルキーで対象オブジェクトを右クリック → `dennokoworks → JointKeeper` で付けて終わり」** とし、必要な場合のみ詳細設定を開く段階的開示（Progressive Disclosure）を採用します。
+
+#### ヒエラルキー右クリックメニュー（`JointKeeperMenu.cs`）
+
+- `[MenuItem("GameObject/dennokoworks/JointKeeper", false, 10)]` で Hierarchy コンテキストメニューおよび上部 `GameObject` メニューへ登録する。
+- 選択中の `GameObject`（複数選択可）に対して `Undo.AddComponent<JointKeeperComponent>(go)` で付与する（`[DisallowMultipleComponent]` により重複付与を防止）。
+- バリデーション関数で、選択中のいずれかの `GameObject` がまだ `JointKeeperComponent` を持っていない場合のみ有効化する。
+
+#### Inspector 段階的開示構成（`JointKeeperEditor.cs`）
+
+1. **通常表示（初期状態 — 付けるだけで完結）:**
+   - **ステータスサマリー:** 対象 `SkinnedMeshRenderer` 数・有効部位（肘/膝）を表示。
+   - **誤配置ガイド（必要時のみ HelpBox 表示）:**
+     - 配下に `SkinnedMeshRenderer` が 0 件の場合（Armature 内ボーンへの誤配置等）：衣装ルートまたはメッシュへのアタッチを促す警告を表示。
+     - アバタールート直下に配置した場合：素体メッシュも自動対象に含まれる旨と、必要に応じた除外リストへの案内を表示。
+   - **最小クイック設定:**
+     - 部位トグル（`肘 (Elbows)` / `膝 (Knees)` ON/OFF）
+     - よく調整する 2 項目のみ（`強度 (Strength)`、`90° 押し出し量 (Push at 90°)`）
+   - **Phase 2 プレビュー操作バー:**
+     - プレビュー ON/OFF トグル、**曲げ角スライダー（0°〜150°）**、**前腕ツイスト角スライダー（-90°〜+90°）**、Before / After 比較トグル、ヒートマップ表示切替（Off / 補助ウェイト分布 / 4 ボーン統合診断）
+2. **折りたたみ `詳細設定 (Advanced)`（初期状態は閉じている）:**
+   - **ターゲット設定:** `AutoDetect` / `ManualList` 切替、対象・除外 `SkinnedMeshRenderer` リスト
+   - **左右リンク解除（`unlinkElbowLeftRight` / `unlinkKneeLeftRight`）**
+   - **詳細リグ・ウェイトパラメータ:** 追従率（`bendFollowRatio`）、カーブ指数（`blendCurvePower`）、楕円体影響範囲（`axialRadiusScale` / `radialRadiusScale` / `innerFalloffRatio`）、非対称フィルタ（`innerCutoff` / `outerFull` / `innerRetention`）、ピボット／外側角オフセット
+   - **ツイストボーン・診断:** 自動検出された $G_P / G_D$ ボーン一覧の読み取り専用表示（依存理由・Constraint 駆動か否かを併記）、既存肘/膝補助ボーン警告ボックス、手動 Override リスト、4 ボーン統合閾値、関節フレーム算出元（`Measured` / `RestBend` / `Prior`）表示と「関節フレーム再計算」ボタン
 
 ### 7.2 Scene ビューギズモ・ハンドル（`JointKeeperSceneHandles` — Phase 2 / Step 3）
 

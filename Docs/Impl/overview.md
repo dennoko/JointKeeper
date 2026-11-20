@@ -20,10 +20,11 @@
 
 ### 【フェーズ1】コア機能・NDMFビルドパイプライン（MVP）
 
-1. **対象部位の自動認識・設定コンポーネント**
+1. **対象部位の自動認識・設定コンポーネント（付けるだけ UX）**
+* ヒエラルキーの右クリックメニュー `dennokoworks → JointKeeper`（`GameObject/dennokoworks/JointKeeper`）から対象オブジェクト（衣装メッシュ・衣装プレハブ・アバタールート）へコンポーネントを付与するだけで、既定設定のままビルド適用が完了する体験を基本とする。
 * アバターのHumanoid設定（`Animator.GetBoneTransform`）から左右の `UpperArm` / `LowerArm` / `UpperLeg` / `LowerLeg` を自動取得。
-* 対象となる衣装の `SkinnedMeshRenderer` を複数指定可能にする（手動指定またはアバター配下からの自動検出）。
-* 部位ごとの有効/無効トグル（右肘・左肘・右膝・左膝）。
+* 対象となる衣装の `SkinnedMeshRenderer` を自動検出（既定：`component.transform` 配下）し、必要に応じて詳細設定から手動指定・除外リストを編集可能にする。
+* Inspector の初期表示は「対象サマリー・肘/膝トグル・強度・押し出し量（＋Phase 2 プレビュー）」に絞り、細かい調整項目は折りたたみの「詳細設定（Advanced）」へ集約する。
 
 
 2. **補助ボーンの非破壊生成とリグ組み込み（NDMF Pass）**
