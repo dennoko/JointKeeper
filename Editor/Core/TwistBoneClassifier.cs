@@ -80,14 +80,11 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (c == null) continue;
                 Transform target = c.TargetTransform != null ? c.TargetTransform : c.transform;
                 var sources = new List<Transform>();
-                if (c.Sources != null)
+                for (int s = 0; s < c.Sources.Count; s++)
                 {
-                    for (int s = 0; s < c.Sources.Count; s++)
-                    {
-                        var src = c.Sources[s];
-                        if (src.SourceTransform != null && src.Weight > 1e-5f)
-                            sources.Add(src.SourceTransform);
-                    }
+                    var src = c.Sources[s];
+                    if (src.SourceTransform != null && src.Weight > 1e-5f)
+                        sources.Add(src.SourceTransform);
                 }
                 if (sources.Count == 0) continue;
 
