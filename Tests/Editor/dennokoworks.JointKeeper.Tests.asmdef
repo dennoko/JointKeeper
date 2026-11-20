@@ -1,0 +1,35 @@
+{
+    "name": "dennokoworks.JointKeeper.Tests",
+    "rootNamespace": "Dennokoworks.JointKeeper.Tests",
+    "references": [
+        "dennokoworks.JointKeeper.Runtime",
+        "dennokoworks.JointKeeper.Editor",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "VRC.SDKBase"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "VRC.Dynamics.dll",
+        "VRC.SDK3.Dynamics.Constraint.dll",
+        "VRC.SDK3.Dynamics.PhysBone.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.7.0",
+            "define": "JOINT_KEEPER_VRCSDK"
+        }
+    ],
+    "noEngineReferences": false
+}

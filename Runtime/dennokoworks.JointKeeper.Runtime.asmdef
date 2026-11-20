@@ -1,0 +1,22 @@
+{
+    "name": "dennokoworks.JointKeeper.Runtime",
+    "rootNamespace": "Dennokoworks.JointKeeper",
+    "references": [
+        "VRC.SDKBase"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.7.0",
+            "define": "JOINT_KEEPER_VRCSDK"
+        }
+    ],
+    "noEngineReferences": false
+}

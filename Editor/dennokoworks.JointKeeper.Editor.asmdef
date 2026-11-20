@@ -1,0 +1,32 @@
+{
+    "name": "dennokoworks.JointKeeper.Editor",
+    "rootNamespace": "Dennokoworks.JointKeeper.Editor",
+    "references": [
+        "dennokoworks.JointKeeper.Runtime",
+        "nadena.dev.ndmf",
+        "nadena.dev.ndmf.runtime",
+        "VRC.SDKBase"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "nadena.dev.ndmf",
+            "expression": "1.0.0",
+            "define": "JOINT_KEEPER_NDMF"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.7.0",
+            "define": "JOINT_KEEPER_VRCSDK"
+        }
+    ],
+    "noEngineReferences": false
+}
