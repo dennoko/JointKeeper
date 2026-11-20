@@ -295,6 +295,10 @@ namespace Dennokoworks.JointKeeper.Editor
                         $"[JointKeeper] '{smr.name}' ({jointId}) でレスト姿勢ズレ {maxDrift * 1000f:F2} mm を検出しました（衣装ボーンが bind pose から大きく動かされている可能性があります）。",
                         smr);
                 }
+
+                Debug.Log(
+                    $"[JointKeeper] '{smr.name}' ({jointId}) 適用: 影響頂点={redResult.Stats.AffectedVertices}, 最大補助ウェイト={redResult.Stats.MaxHelperWeight:F2}, Src=({groups.ProximalSource.name}, {groups.DistalSource.name}), 補助ボーン={helperBone.name}, レストズレ={maxDrift * 1000f:F3} mm",
+                    smr);
             }
 
             if (!anyModified)

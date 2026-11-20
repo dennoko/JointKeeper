@@ -32,6 +32,11 @@ namespace Dennokoworks.JointKeeper.Editor
         public readonly HashSet<Transform> PhysBoneSet = new HashSet<Transform>();
         public readonly Dictionary<Transform, List<ConstraintInfo>> ConstraintsByTarget =
             new Dictionary<Transform, List<ConstraintInfo>>();
+        /// <summary>
+        /// レスト状態で休止中（GlobalWeight==0 / IsActive==false / enabled==false）の Constraint が付いた Transform。
+        /// AvatarPoseSystem の *_Const ラッパー等の検出・ソース昇格に使用する。
+        /// </summary>
+        public readonly HashSet<Transform> DormantConstrainedTransforms = new HashSet<Transform>();
         public readonly HashSet<Transform> AllHumanoidBones = new HashSet<Transform>();
 
         public static AvatarKinematicContext Build(
@@ -53,13 +58,13 @@ namespace Dennokoworks.JointKeeper.Editor
                 }
             }
 
-            // 2. 全 VRCPhysBone 対象ボーン収集
+            // 2. 全 VRCPhysBone 対象ボーン収集（無効化された PhysBone は除外）
 #if JOINT_KEEPER_VRCSDK
             var physBones = avatarRoot.GetComponentsInChildren<VRCPhysBone>(true);
             for (int i = 0; i < physBones.Length; i++)
             {
                 var pb = physBones[i];
-                if (pb == null) continue;
+                if (pb == null || !pb.enabled) continue;
                 Transform root = pb.rootTransform != null ? pb.rootTransform : pb.transform;
                 var ignored = new HashSet<Transform>();
                 if (pb.ignoreTransforms != null)
@@ -74,7 +79,7 @@ namespace Dennokoworks.JointKeeper.Editor
             }
 #endif
 
-            // 3. 全 VRCConstraintBase 収集
+            // 3. 全 VRCConstraintBase 収集（休止中・ウェイト 0 の Constraint は外部依存とせず休止ラッパーとして記録）
 #if JOINT_KEEPER_VRCSDK
             var vrcConstraints = avatarRoot.GetComponentsInChildren<VRCConstraintBase>(true);
             for (int i = 0; i < vrcConstraints.Length; i++)
@@ -82,6 +87,15 @@ namespace Dennokoworks.JointKeeper.Editor
                 var c = vrcConstraints[i];
                 if (c == null) continue;
                 Transform target = c.TargetTransform != null ? c.TargetTransform : c.transform;
+
+                bool isActiveConstraint = c.enabled && c.IsActive && c.GlobalWeight > 1e-5f;
+                if (!isActiveConstraint)
+                {
+                    if (c.Sources.Count > 0)
+                        ctx.DormantConstrainedTransforms.Add(target);
+                    continue;
+                }
+
                 var sources = new List<Transform>();
                 for (int s = 0; s < c.Sources.Count; s++)
                 {
@@ -104,6 +118,15 @@ namespace Dennokoworks.JointKeeper.Editor
                 var comp = c as Component;
                 if (c == null || comp == null) continue;
 
+                var beh = c as Behaviour;
+                bool isActiveConstraint = (beh == null || beh.enabled) && c.constraintActive && c.weight > 1e-5f;
+                if (!isActiveConstraint)
+                {
+                    if (c.sourceCount > 0)
+                        ctx.DormantConstrainedTransforms.Add(comp.transform);
+                    continue;
+                }
+
                 var sources = new List<Transform>();
                 for (int s = 0; s < c.sourceCount; s++)
                 {
@@ -123,6 +146,11 @@ namespace Dennokoworks.JointKeeper.Editor
         public bool IsConstraintDriven(Transform t)
         {
             return t != null && ConstraintsByTarget.ContainsKey(t);
+        }
+
+        public bool HasDormantConstraint(Transform t)
+        {
+            return t != null && DormantConstrainedTransforms.Contains(t);
         }
 
         private static void CollectSubtreeExcluding(Transform root, HashSet<Transform> ignored, HashSet<Transform> output)
@@ -459,26 +487,7 @@ namespace Dennokoworks.JointKeeper.Editor
             foreach (var kv in boneInfoMap)
                 result.ClassifiedBones.Add(kv.Value);
 
-            // 7. Constraint ソース確定
-            result.ProximalSource = (lower.parent != null && proximalSet.Contains(lower.parent))
-                ? lower.parent
-                : upper;
-
-            if (config != null
-                && config.distalSourceMode == DistalSourceMode.CustomOverride
-                && config.distalSourceOverride != null)
-            {
-                result.DistalSource = config.distalSourceOverride;
-            }
-            else
-            {
-                result.DistalSource = lower;
-            }
-
-            result.ProximalSourceIsConstraintDriven = ctx.IsConstraintDriven(result.ProximalSource);
-            result.DistalSourceIsConstraintDriven = ctx.IsConstraintDriven(result.DistalSource);
-
-            // 8. 基準 Bindpose ボーン確定 (ADR-07)
+            // 7. 基準 Bindpose ボーン確定 (ADR-07)
             result.ProximalReferenceBoneIndex = SelectReferenceBoneIndex(
                 upperSmrIdx, serialProximal, result.ProximalBoneIndices, smrBoneIndexLookup,
                 boneWeights, worldVertices, jointFrame, config);
@@ -493,7 +502,61 @@ namespace Dennokoworks.JointKeeper.Editor
             if (result.DistalReferenceBoneIndex < 0)
                 result.DistalReferenceBoneIndex = result.ProximalReferenceBoneIndex;
 
+            // 8. Constraint ソース確定（AvatarPoseSystem 等の休止中ポーズラッパーが実ボーンとの間にある場合はラッパーへ昇格）
+            Transform baseProximalSource = (lower.parent != null && proximalSet.Contains(lower.parent))
+                ? lower.parent
+                : upper;
+
+            Transform proxRefBone = ResolveSmrBoneTransform(smrBones, result.ProximalReferenceBoneIndex, boneAliasMap);
+            result.ProximalSource = ResolvePoseWrapperSource(baseProximalSource, proxRefBone, proximalSet, ctx);
+
+            if (config != null
+                && config.distalSourceMode == DistalSourceMode.CustomOverride
+                && config.distalSourceOverride != null)
+            {
+                result.DistalSource = config.distalSourceOverride;
+            }
+            else
+            {
+                Transform distRefBone = ResolveSmrBoneTransform(smrBones, result.DistalReferenceBoneIndex, boneAliasMap);
+                result.DistalSource = ResolvePoseWrapperSource(lower, distRefBone, distalSet, ctx);
+            }
+
+            result.ProximalSourceIsConstraintDriven = ctx.IsConstraintDriven(result.ProximalSource) || ctx.HasDormantConstraint(result.ProximalSource);
+            result.DistalSourceIsConstraintDriven = ctx.IsConstraintDriven(result.DistalSource) || ctx.HasDormantConstraint(result.DistalSource);
+
             return result;
+        }
+
+        private static Transform ResolveSmrBoneTransform(
+            Transform[] smrBones,
+            int index,
+            Dictionary<Transform, Transform> boneAliasMap)
+        {
+            if (smrBones == null || index < 0 || index >= smrBones.Length)
+                return null;
+            Transform raw = smrBones[index];
+            if (raw == null) return null;
+            return (boneAliasMap != null && boneAliasMap.TryGetValue(raw, out var mapped)) ? mapped : raw;
+        }
+
+        private static Transform ResolvePoseWrapperSource(
+            Transform baseSource,
+            Transform refBone,
+            HashSet<Transform> groupSet,
+            AvatarKinematicContext ctx)
+        {
+            if (baseSource == null || refBone == null || ctx == null || ctx.DormantConstrainedTransforms.Count == 0)
+                return baseSource;
+
+            Transform cur = refBone;
+            while (cur != null && cur != baseSource)
+            {
+                if (groupSet.Contains(cur) && ctx.HasDormantConstraint(cur))
+                    return cur;
+                cur = cur.parent;
+            }
+            return baseSource;
         }
 
         private static int SelectReferenceBoneIndex(

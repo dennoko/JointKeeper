@@ -43,6 +43,8 @@ namespace Dennokoworks.JointKeeper.Tests
             var rotC = twist.AddComponent<RotationConstraint>();
             rotC.AddSource(new ConstraintSource { sourceTransform = hand.transform, weight = 0.5f });
             rotC.rotationAxis = Axis.Y;
+            rotC.weight = 1f;
+            rotC.constraintActive = true;
 
             var smrBones = new[] { upper.transform, lower.transform, cuff.transform, twist.transform, hand.transform };
             var ctx = AvatarKinematicContext.Build(root, null);
@@ -91,6 +93,8 @@ namespace Dennokoworks.JointKeeper.Tests
             var rotC = upperRoll.AddComponent<RotationConstraint>();
             rotC.AddSource(new ConstraintSource { sourceTransform = lower.transform, weight = 0.5f });
             rotC.rotationAxis = Axis.X; // 1 軸のみ
+            rotC.weight = 1f;
+            rotC.constraintActive = true;
 
             var smrBones = new[] { upper.transform, lower.transform, upperRoll.transform };
             var ctx = AvatarKinematicContext.Build(root, null);
@@ -117,6 +121,8 @@ namespace Dennokoworks.JointKeeper.Tests
             parentC.AddSource(new ConstraintSource { sourceTransform = lower.transform, weight = 0.5f });
             parentC.rotationAxis = Axis.X | Axis.Y | Axis.Z;
             parentC.translationAxis = Axis.X | Axis.Y | Axis.Z;
+            parentC.weight = 1f;
+            parentC.constraintActive = true;
 
             var smrBones = new[] { upper.transform, lower.transform, existingHelper.transform };
             var ctx = AvatarKinematicContext.Build(root, null);
@@ -150,6 +156,62 @@ namespace Dennokoworks.JointKeeper.Tests
 
             Assert.AreEqual(0, groups.ProximalReferenceBoneIndex);
             Assert.AreEqual(1, groups.DistalReferenceBoneIndex);
+        }
+
+        [Test]
+        public void DormantPoseWrapperConstraint_DoesNotExcludeChildBones_AndPromotesSourcesToWrapper()
+        {
+            // AvatarPoseSystem + MA ScaleAdjuster + 素体既存膝補助ボーンの組み合わせを再現
+            var root = CreateGo("Avatar");
+            var worldFix = CreateGo("WorldFix", root.transform);
+            var fixUpper = CreateGo("Fix_UpperLeg_L", worldFix.transform);
+            var fixLower = CreateGo("Fix_LowerLeg_L", worldFix.transform);
+
+            var upperClone = CreateGo("UpperLeg_L", root.transform);
+            var upperConst = CreateGo("UpperLeg_L_Const", upperClone.transform);
+            var upperOrig = CreateGo("UpperLeg_L", upperConst.transform);
+            var lowerLegKnee = CreateGo("LowerLegKnee_L", upperOrig.transform);
+            var upperScaleProxy = CreateGo("ScaleProxy", upperOrig.transform);
+
+            var lowerClone = CreateGo("LowerLeg_L", upperClone.transform);
+            var lowerConst = CreateGo("LowerLeg_L_Const", lowerClone.transform);
+            var lowerOrig = CreateGo("LowerLeg_L", lowerConst.transform);
+            var lowerScaleProxy = CreateGo("ScaleProxy", lowerOrig.transform);
+
+            var footClone = CreateGo("Foot_L", lowerClone.transform);
+
+            // 休止中ポーズラッパー (weight = 0 で外部 WorldFix を参照)
+            var pcU = upperConst.AddComponent<ParentConstraint>();
+            pcU.AddSource(new ConstraintSource { sourceTransform = fixUpper.transform, weight = 1f });
+            pcU.weight = 0f;
+            pcU.constraintActive = true;
+
+            var pcL = lowerConst.AddComponent<ParentConstraint>();
+            pcL.AddSource(new ConstraintSource { sourceTransform = fixLower.transform, weight = 1f });
+            pcL.weight = 0f;
+            pcL.constraintActive = true;
+
+            // 素体既存の 3 軸膝補助ボーン (active, weight = 0.5)
+            var kneeRc = lowerLegKnee.AddComponent<RotationConstraint>();
+            kneeRc.AddSource(new ConstraintSource { sourceTransform = lowerOrig.transform, weight = 1f });
+            kneeRc.rotationAxis = Axis.X | Axis.Y | Axis.Z;
+            kneeRc.weight = 0.5f;
+            kneeRc.constraintActive = true;
+
+            var smrBones = new[] { upperScaleProxy.transform, lowerScaleProxy.transform, lowerLegKnee.transform };
+            var ctx = AvatarKinematicContext.Build(root, null);
+
+            var groups = TwistBoneClassifier.Classify(
+                JointId.LeftKnee, upperClone.transform, lowerClone.transform, footClone.transform,
+                smrBones, new JointConfig(), ctx);
+
+            Assert.IsTrue(groups.ProximalBoneIndices.Contains(0), "休止中ラッパー配下の ScaleProxy が G_P に分類されること");
+            Assert.IsTrue(groups.DistalBoneIndices.Contains(1), "休止中ラッパー配下の ScaleProxy が G_D に分類されること");
+            Assert.IsTrue(groups.ExistingJointHelpers.Contains(lowerLegKnee.transform), "素体既存膝ボーンは除外対象として検出されること");
+            Assert.IsFalse(groups.ProximalBoneIndices.Contains(2));
+            Assert.IsFalse(groups.DistalBoneIndices.Contains(2));
+            Assert.AreEqual(upperConst.transform, groups.ProximalSource, "ProximalSource がポーズラッパーへ昇格されること");
+            Assert.AreEqual(lowerConst.transform, groups.DistalSource, "DistalSource がポーズラッパーへ昇格されること");
         }
     }
 }
