@@ -195,7 +195,8 @@ namespace Dennokoworks.JointKeeper.Editor
             if (vertCount == 0 || origMesh.bindposes == null || origMesh.bindposes.Length == 0)
                 return data;
 
-            Vector3[] worldVerts = SkinningEvaluator.EvaluateWorldVerticesCpu(smr);
+            var scaleAdjusterMap = PreviewBoneResolver.CollectScaleAdjusterScales(smr.bones);
+            Vector3[] worldVerts = SkinningEvaluator.EvaluateWorldVerticesCpu(smr, scaleAdjusterMap);
             var workingBones = new List<Transform>(smr.bones);
             var workingBindposes = new List<Matrix4x4>(origMesh.bindposes);
             BoneWeight[] workingWeights = (BoneWeight[])origMesh.boneWeights.Clone();
@@ -251,8 +252,17 @@ namespace Dennokoworks.JointKeeper.Editor
 
                 int pRef = groups.ProximalReferenceBoneIndex;
                 int dRef = groups.DistalReferenceBoneIndex;
-                Matrix4x4 sp = workingBones[pRef].localToWorldMatrix * workingBindposes[pRef];
-                Matrix4x4 sd = workingBones[dRef].localToWorldMatrix * workingBindposes[dRef];
+
+                Matrix4x4 pWorld = workingBones[pRef].localToWorldMatrix;
+                if (scaleAdjusterMap.TryGetValue(workingBones[pRef], out Vector3 pScale))
+                    pWorld = pWorld * Matrix4x4.Scale(pScale);
+
+                Matrix4x4 dWorld = workingBones[dRef].localToWorldMatrix;
+                if (scaleAdjusterMap.TryGetValue(workingBones[dRef], out Vector3 dScale))
+                    dWorld = dWorld * Matrix4x4.Scale(dScale);
+
+                Matrix4x4 sp = pWorld * workingBindposes[pRef];
+                Matrix4x4 sd = dWorld * workingBindposes[dRef];
                 Matrix4x4 helperBind = SkinningEvaluator.ComputeHelperBindpose(
                     shadowHelper.localToWorldMatrix, sp, sd, Mathf.Clamp(cfg.bendFollowRatio, 0.1f, 0.9f));
 
@@ -353,6 +363,9 @@ namespace Dennokoworks.JointKeeper.Editor
             if (proxySmr == null || !_dataByOriginal.TryGetValue(original, out var data))
                 return;
 
+            // ProxyObjectController.OnPreFrame が毎フレーム元の Mesh / Materials / Bones を復元し、
+            // 上流フィルタ（MA MeshDeleter / MaterialSetter / ScaleAdjuster 等）が適用された後に OnFrame が呼ばれる。
+            // そのため変更なしのときや通常表示では sharedMesh / sharedMaterials を元値で上書きせず、上流プレビューを保持する。
             if (!data.HasJointKeeperChanges || JointKeeperPreviewState.ShowBeforeOnly)
             {
                 if (data.BeforeShadowBones != null)

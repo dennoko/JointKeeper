@@ -8,6 +8,9 @@ namespace Dennokoworks.JointKeeper.Editor
     /// <summary>
     /// Phase 2 プレビュー用の非保存影ボーン階層 (§7.3)。
     /// 元アバターのボーンを一切回転させず、毎フレーム影階層のみを同期・曲げ・ツイスト・RigMath 評価する。
+    /// MA Merge Armature 衣装（Blender 100x スケールや異なるローカル回転を持つ衣装を含む）の
+    /// bindpose 不整合によるメッシュ絞り込みを防ぐため、衣装 SMR には衣装側の影ボーンをそのまま割り当て、
+    /// アバター側の曲げ・ツイスト差分だけを剛体ワールド変換として衣装側影ボーンへ伝播する。
     /// </summary>
     internal sealed class JointKeeperPreviewPose : IDisposable
     {
@@ -32,13 +35,20 @@ namespace Dennokoworks.JointKeeper.Editor
             public Vector3 LimbAxisInParentLocal;
         }
 
+        private sealed class OutfitFollowerEntry
+        {
+            public Transform OutfitShadow;
+            public Transform AvatarShadow;
+        }
+
         private GameObject _shadowRoot;
         private readonly Dictionary<Transform, Transform> _origToShadow = new Dictionary<Transform, Transform>();
+        private readonly Dictionary<Transform, Transform> _smrBoneToShadow = new Dictionary<Transform, Transform>();
         private readonly List<(Transform orig, Transform shadow)> _syncPairs = new List<(Transform, Transform)>();
         private readonly Dictionary<RigSignatureKey, ShadowHelperEntry> _helpersByKey =
             new Dictionary<RigSignatureKey, ShadowHelperEntry>();
         private readonly List<JointBendInfo> _bendInfos = new List<JointBendInfo>();
-        private readonly Dictionary<Transform, Transform> _outfitAliasMap;
+        private readonly List<OutfitFollowerEntry> _outfitFollowers = new List<OutfitFollowerEntry>();
 
         public JointKeeperPreviewPose(
             GameObject avatarRoot,
@@ -46,7 +56,7 @@ namespace Dennokoworks.JointKeeper.Editor
             Dictionary<JointId, JointFrame> baseFrames,
             Dictionary<Transform, Transform> outfitAliasMap)
         {
-            _outfitAliasMap = outfitAliasMap ?? new Dictionary<Transform, Transform>();
+            var aliasMap = outfitAliasMap ?? new Dictionary<Transform, Transform>();
             if (avatarRoot == null) return;
 
             _shadowRoot = new GameObject($"__JK_ShadowPose_{avatarRoot.name}")
@@ -56,10 +66,12 @@ namespace Dennokoworks.JointKeeper.Editor
             _shadowRoot.transform.SetPositionAndRotation(avatarRoot.transform.position, avatarRoot.transform.rotation);
             _shadowRoot.transform.localScale = avatarRoot.transform.localScale;
             _origToShadow[avatarRoot.transform] = _shadowRoot.transform;
+            _smrBoneToShadow[avatarRoot.transform] = _shadowRoot.transform;
             _syncPairs.Add((avatarRoot.transform, _shadowRoot.transform));
 
             CloneHierarchy(avatarRoot.transform, _shadowRoot.transform);
 
+            var bentAvatarBones = new HashSet<Transform>();
             if (humanoidBones != null && baseFrames != null)
             {
                 foreach (var kv in baseFrames)
@@ -67,6 +79,8 @@ namespace Dennokoworks.JointKeeper.Editor
                     Transform lowerOrig = HumanoidBoneResolver.GetBone(humanoidBones, kv.Key.GetLowerHumanoidBone());
                     if (lowerOrig == null || !_origToShadow.TryGetValue(lowerOrig, out Transform lowerShadow))
                         continue;
+
+                    bentAvatarBones.Add(lowerOrig);
 
                     Transform refParent = lowerShadow.parent != null ? lowerShadow.parent : _shadowRoot.transform;
                     _bendInfos.Add(new JointBendInfo
@@ -76,6 +90,37 @@ namespace Dennokoworks.JointKeeper.Editor
                         HingeAxisInParentLocal = refParent.InverseTransformDirection(kv.Value.HingeAxis).normalized,
                         LimbAxisInParentLocal = refParent.InverseTransformDirection(kv.Value.LimbAxis).normalized,
                     });
+                }
+            }
+
+            // MA Merge Armature 衣装のうち、曲げ対象のアバター下肢（またはその子孫）に対応する衣装側影ボーンを登録。
+            // 親が既に追従対象なら子孫は階層連動するため重複適用しない（手袋・靴下等、下肢を持たず Hand/Foot から始まる衣装にも対応）。
+            if (bentAvatarBones.Count > 0 && aliasMap.Count > 0)
+            {
+                var affectedOutfitOrigs = new HashSet<Transform>();
+                foreach (var kv in aliasMap)
+                {
+                    if (kv.Key == null || kv.Value == null) continue;
+                    if (IsSelfOrDescendantOfAny(kv.Value, bentAvatarBones))
+                        affectedOutfitOrigs.Add(kv.Key);
+                }
+
+                foreach (var outfitOrig in affectedOutfitOrigs)
+                {
+                    if (HasAncestorInSet(outfitOrig, affectedOutfitOrigs))
+                        continue;
+
+                    Transform avatarOrig = aliasMap[outfitOrig];
+                    if (_origToShadow.TryGetValue(outfitOrig, out Transform outfitShadow)
+                        && _origToShadow.TryGetValue(avatarOrig, out Transform avatarShadow)
+                        && outfitShadow != avatarShadow)
+                    {
+                        _outfitFollowers.Add(new OutfitFollowerEntry
+                        {
+                            OutfitShadow = outfitShadow,
+                            AvatarShadow = avatarShadow,
+                        });
+                    }
                 }
             }
         }
@@ -91,8 +136,8 @@ namespace Dennokoworks.JointKeeper.Editor
             if (_helpersByKey.TryGetValue(key, out var existing))
                 return existing.HelperShadow;
 
-            Transform proxShadow = ResolveShadowBone(proximalSourceOrig);
-            Transform distShadow = ResolveShadowBone(distalSourceOrig);
+            Transform proxShadow = ResolveConstraintShadowBone(proximalSourceOrig);
+            Transform distShadow = ResolveConstraintShadowBone(distalSourceOrig);
             if (proxShadow == null || distShadow == null)
                 return null;
 
@@ -148,12 +193,24 @@ namespace Dennokoworks.JointKeeper.Editor
             return helper;
         }
 
-        public Transform ResolveShadowBone(Transform origBone)
+        /// <summary>
+        /// Constraint ソース用の影ボーンを返す（ScaleProxy ではなく本体ボーンの影を返す）。
+        /// </summary>
+        private Transform ResolveConstraintShadowBone(Transform origBone)
         {
             if (origBone == null) return null;
-            if (_outfitAliasMap.TryGetValue(origBone, out Transform mapped))
-                origBone = mapped;
             return _origToShadow.TryGetValue(origBone, out Transform shadow) ? shadow : origBone;
+        }
+
+        /// <summary>
+        /// SMR.bones 用の影ボーンを返す。衣装ボーンをアバターボーンへ無理に置換せず、
+        /// 衣装側自身の影ボーン（MA Scale Adjuster があればその ScaleProxy 影）を返すことで
+        /// 100x スケールやローカル軸差による bindpose 破綻を完全に防ぐ。
+        /// </summary>
+        public Transform ResolveSmrShadowBone(Transform origBone)
+        {
+            if (origBone == null) return null;
+            return _smrBoneToShadow.TryGetValue(origBone, out Transform shadow) ? shadow : origBone;
         }
 
         public Transform[] MapBonesToShadow(Transform[] workingBones)
@@ -165,13 +222,14 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (b != null && b.hideFlags == HideFlags.HideAndDontSave)
                     mapped[i] = b; // 既に影補助ボーン
                 else
-                    mapped[i] = ResolveShadowBone(b);
+                    mapped[i] = ResolveSmrShadowBone(b);
             }
             return mapped;
         }
 
         /// <summary>
-        /// 毎フレーム 1 回（OnFrameGroup）呼び出し、元ボーンの TRS 同期 → 曲げ/ツイスト適用 → RigMath 評価を行う。
+        /// 毎フレーム 1 回（OnFrameGroup）呼び出し、元ボーンの TRS 同期 → 曲げ/ツイスト適用 →
+        /// 衣装側影ボーンへの剛体差分伝播 → RigMath 評価を行う。
         /// </summary>
         public void UpdateFrame(float bendAngleDeg, float twistAngleDeg)
         {
@@ -192,6 +250,31 @@ namespace Dennokoworks.JointKeeper.Editor
                     shadow.localPosition = orig.localPosition;
                     shadow.localRotation = orig.localRotation;
                     shadow.localScale = orig.localScale;
+                }
+            }
+
+            // 1b. 衣装追従用のレスト姿勢（曲げ適用前）のワールド位置・回転を記録
+            int followerCount = _outfitFollowers.Count;
+            Vector3[] avRestPos = null;
+            Quaternion[] avRestRot = null;
+            Vector3[] outRestPos = null;
+            Quaternion[] outRestRot = null;
+
+            bool hasPoseChange = Mathf.Abs(bendAngleDeg) > 1e-3f || Mathf.Abs(twistAngleDeg) > 1e-3f;
+            if (hasPoseChange && followerCount > 0)
+            {
+                avRestPos = new Vector3[followerCount];
+                avRestRot = new Quaternion[followerCount];
+                outRestPos = new Vector3[followerCount];
+                outRestRot = new Quaternion[followerCount];
+                for (int i = 0; i < followerCount; i++)
+                {
+                    var f = _outfitFollowers[i];
+                    if (f.AvatarShadow == null || f.OutfitShadow == null) continue;
+                    avRestPos[i] = f.AvatarShadow.position;
+                    avRestRot[i] = f.AvatarShadow.rotation;
+                    outRestPos[i] = f.OutfitShadow.position;
+                    outRestRot[i] = f.OutfitShadow.rotation;
                 }
             }
 
@@ -220,6 +303,21 @@ namespace Dennokoworks.JointKeeper.Editor
                     Vector3 currentAxis = (bendWorld * limbWorld).normalized;
                     Quaternion twistWorld = Quaternion.AngleAxis(twistAngleDeg, currentAxis);
                     info.LowerShadow.rotation = twistWorld * info.LowerShadow.rotation;
+                }
+            }
+
+            // 2b. アバター側影ボーンの曲げ/ツイスト剛体差分を衣装側影ボーンへ適用（localScale は一切変更しない）
+            if (hasPoseChange && followerCount > 0)
+            {
+                for (int i = 0; i < followerCount; i++)
+                {
+                    var f = _outfitFollowers[i];
+                    if (f.AvatarShadow == null || f.OutfitShadow == null) continue;
+
+                    Quaternion deltaRot = f.AvatarShadow.rotation * Quaternion.Inverse(avRestRot[i]);
+                    Vector3 newPos = f.AvatarShadow.position + deltaRot * (outRestPos[i] - avRestPos[i]);
+                    Quaternion newRot = deltaRot * outRestRot[i];
+                    f.OutfitShadow.SetPositionAndRotation(newPos, newRot);
                 }
             }
 
@@ -274,8 +372,50 @@ namespace Dennokoworks.JointKeeper.Editor
                 _origToShadow[origChild] = shadowChild;
                 _syncPairs.Add((origChild, shadowChild));
 
+                // MA Scale Adjuster があるボーンは ScaleAdjusterPass と同一の ScaleProxy を影階層にも用意する
+                if (PreviewBoneResolver.TryGetScaleAdjusterScale(origChild, out Vector3 saScale)
+                    && (saScale - Vector3.one).sqrMagnitude > 1e-8f)
+                {
+                    var proxyGo = new GameObject($"{origChild.name}__JK_ScaleProxy")
+                    {
+                        hideFlags = HideFlags.HideAndDontSave,
+                    };
+                    Transform proxyT = proxyGo.transform;
+                    proxyT.SetParent(shadowChild, false);
+                    proxyT.localPosition = Vector3.zero;
+                    proxyT.localRotation = Quaternion.identity;
+                    proxyT.localScale = saScale;
+                    _smrBoneToShadow[origChild] = proxyT;
+                }
+                else
+                {
+                    _smrBoneToShadow[origChild] = shadowChild;
+                }
+
                 CloneHierarchy(origChild, shadowChild);
             }
+        }
+
+        private static bool IsSelfOrDescendantOfAny(Transform t, HashSet<Transform> roots)
+        {
+            Transform cur = t;
+            while (cur != null)
+            {
+                if (roots.Contains(cur)) return true;
+                cur = cur.parent;
+            }
+            return false;
+        }
+
+        private static bool HasAncestorInSet(Transform t, HashSet<Transform> set)
+        {
+            Transform cur = t != null ? t.parent : null;
+            while (cur != null)
+            {
+                if (set.Contains(cur)) return true;
+                cur = cur.parent;
+            }
+            return false;
         }
 
         public void Dispose()
@@ -286,9 +426,11 @@ namespace Dennokoworks.JointKeeper.Editor
                 _shadowRoot = null;
             }
             _origToShadow.Clear();
+            _smrBoneToShadow.Clear();
             _syncPairs.Clear();
             _helpersByKey.Clear();
             _bendInfos.Clear();
+            _outfitFollowers.Clear();
         }
     }
 }
