@@ -75,7 +75,7 @@ When the component is selected, each active joint shows the following guides:
 - **Orange arrow**: Outward direction of the joint
 - **Red line**: Bend axis
 
-### 3.5 Destructive Bake
+### 3.5 Bake
 
 Generates helper bones and `.asset` meshes directly in your project and swaps them onto the renderers. Mesh `.asset` files are saved in the same folder as the original mesh.
 
@@ -161,7 +161,7 @@ Off by default, mirroring left-side settings to the right side. Enable to config
 5. **PhysBones on the Forearm**
    PhysBone chains on the forearm continue following the original bone roll and may drift slightly from surrounding sleeve vertices when Forearm Twist Distribution is enabled.
 6. **Modular Avatar Compatibility**
-   Supports `MA Merge Armature`, `MA Scale Adjuster`, and Blender 100x-scale outfit armatures. If you change `MA Scale Adjuster` values after running destructive Bake & Replace, click `Re-Bake`.
+   Supports `MA Merge Armature`, `MA Scale Adjuster`, and Blender 100x-scale outfit armatures. If you change `MA Scale Adjuster` values after running Bake & Replace, click `Re-Bake`.
 
 ---
 

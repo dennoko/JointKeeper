@@ -207,8 +207,8 @@
     },
     {
       "key": "bake.section_title",
-      "ja": "破壊的ベイク (Bake & Replace)",
-      "en": "Destructive Bake (Bake & Replace)"
+      "ja": "ベイク (Bake & Replace)",
+      "en": "Bake (Bake & Replace)"
     },
     {
       "key": "bake.section_desc",
