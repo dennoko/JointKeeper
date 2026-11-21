@@ -28,8 +28,8 @@ namespace Dennokoworks.JointKeeper.Editor
         {
             public JointId JointId;
             public Transform LowerShadow;
-            public Vector3 HingeAxisWorldAtRest;
-            public Vector3 LimbAxisWorldAtRest;
+            public Vector3 HingeAxisInParentLocal;
+            public Vector3 LimbAxisInParentLocal;
         }
 
         private GameObject _shadowRoot;
@@ -68,12 +68,13 @@ namespace Dennokoworks.JointKeeper.Editor
                     if (lowerOrig == null || !_origToShadow.TryGetValue(lowerOrig, out Transform lowerShadow))
                         continue;
 
+                    Transform refParent = lowerShadow.parent != null ? lowerShadow.parent : _shadowRoot.transform;
                     _bendInfos.Add(new JointBendInfo
                     {
                         JointId = kv.Key,
                         LowerShadow = lowerShadow,
-                        HingeAxisWorldAtRest = kv.Value.HingeAxis,
-                        LimbAxisWorldAtRest = kv.Value.LimbAxis,
+                        HingeAxisInParentLocal = refParent.InverseTransformDirection(kv.Value.HingeAxis).normalized,
+                        LimbAxisInParentLocal = refParent.InverseTransformDirection(kv.Value.LimbAxis).normalized,
                     });
                 }
             }
@@ -200,17 +201,23 @@ namespace Dennokoworks.JointKeeper.Editor
                 var info = _bendInfos[i];
                 if (info.LowerShadow == null) continue;
 
-                // ヒンジ軸回りの曲げ回転（Outward の反対側＝内側へ曲げる）
+                Transform refParent = info.LowerShadow.parent != null ? info.LowerShadow.parent : _shadowRoot.transform;
+                Vector3 hingeWorld = refParent.TransformDirection(info.HingeAxisInParentLocal).normalized;
+                Vector3 limbWorld = refParent.TransformDirection(info.LimbAxisInParentLocal).normalized;
+
+                // HingeAxis = Cross(LimbAxis, Outward) なので、Unity の Quaternion.AngleAxis(+θ, H) * L は
+                // H × L = +Outward（逆反り方向）へ回る。したがって内側へ自然に曲げるには -bendAngleDeg を使用する。
+                Quaternion bendWorld = Quaternion.identity;
                 if (Mathf.Abs(bendAngleDeg) > 1e-3f)
                 {
-                    Quaternion bendWorld = Quaternion.AngleAxis(bendAngleDeg, info.HingeAxisWorldAtRest);
+                    bendWorld = ComputeFlexionRotation(hingeWorld, bendAngleDeg);
                     info.LowerShadow.rotation = bendWorld * info.LowerShadow.rotation;
                 }
 
                 // 肘のみ前腕ツイスト角を適用
                 if (info.JointId.IsElbow() && Mathf.Abs(twistAngleDeg) > 1e-3f)
                 {
-                    Vector3 currentAxis = (Quaternion.AngleAxis(bendAngleDeg, info.HingeAxisWorldAtRest) * info.LimbAxisWorldAtRest).normalized;
+                    Vector3 currentAxis = (bendWorld * limbWorld).normalized;
                     Quaternion twistWorld = Quaternion.AngleAxis(twistAngleDeg, currentAxis);
                     info.LowerShadow.rotation = twistWorld * info.LowerShadow.rotation;
                 }
@@ -238,6 +245,15 @@ namespace Dennokoworks.JointKeeper.Editor
 
                 e.HelperShadow.SetPositionAndRotation(worldPos, worldRot);
             }
+        }
+
+        /// <summary>
+        /// JointFrame.HingeAxis (= Cross(LimbAxis, Outward)) を基準に、
+        /// 下肢（LimbAxis）を外側（Outward）と反対の解剖学的屈曲方向（-Outward）へ曲げる回転を返す。
+        /// </summary>
+        internal static Quaternion ComputeFlexionRotation(Vector3 hingeAxisWorld, float bendAngleDeg)
+        {
+            return Quaternion.AngleAxis(-bendAngleDeg, hingeAxisWorld);
         }
 
         private void CloneHierarchy(Transform origParent, Transform shadowParent)

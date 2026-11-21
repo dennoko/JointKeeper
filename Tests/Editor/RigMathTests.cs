@@ -33,9 +33,17 @@ namespace Dennokoworks.JointKeeper.Tests
             RigMath.ComputeSourceOffsets(src0Rest.inverse, Quaternion.identity, anchorA, helperRestRot, out var pOff0, out var rOff0);
             RigMath.ComputeSourceOffsets(src1Rest.inverse, Quaternion.identity, anchorB, helperRestRot, out var pOff1, out var rOff1);
 
-            // 膝を後方 (-Z) へ bendDeg 曲げる回転 (limbAxis を -outwardRest 方向へ回す)
-            Quaternion bendRot = Quaternion.AngleAxis(bendDeg, hingeAxis);
+            // 膝を後方 (-Z = -outwardRest) へ bendDeg 曲げる回転。
+            // hingeAxis = Cross(limbAxis, outwardRest) なので、-bendDeg で limbAxis が -outwardRest 方向へ回る。
+            Quaternion bendRot = JointKeeperPreviewPose.ComputeFlexionRotation(hingeAxis, bendDeg);
             Matrix4x4 src1Bent = Matrix4x4.TRS(jointCenter, bendRot, Vector3.one);
+
+            // 下腿が解剖学的に後方 (-Z) へ曲がっていることを検証
+            if (bendDeg > 1f && bendDeg < 179f)
+            {
+                Vector3 bentLowerDir = (bendRot * limbAxis).normalized;
+                Assert.Greater(Vector3.Dot(bentLowerDir, -outwardRest), 0f, "正の曲げ角は Outward の反対側（内側）へ曲がること");
+            }
 
             RigMath.EvaluateParentConstraint(
                 src0Rest, Quaternion.identity, pOff0, rOff0, w0,
@@ -48,7 +56,7 @@ namespace Dennokoworks.JointKeeper.Tests
 
             if (bendDeg > 1f)
             {
-                Vector3 expectedBisector = (Quaternion.AngleAxis(bendDeg * 0.5f, hingeAxis) * outwardRest).normalized;
+                Vector3 expectedBisector = (JointKeeperPreviewPose.ComputeFlexionRotation(hingeAxis, bendDeg * 0.5f) * outwardRest).normalized;
                 Assert.Greater(Vector3.Dot(delta.normalized, expectedBisector), 0.9999f);
             }
         }
@@ -103,6 +111,43 @@ namespace Dennokoworks.JointKeeper.Tests
             Vector3 pZero = EvalAtPush(0f);
             Vector3 pEps = EvalAtPush(1e-5f);
             Assert.Less((pEps - pZero).magnitude, 2e-5f);
+        }
+
+        [Test]
+        public void PreviewFlexionRotation_BendsElbowsForwardAndKneesBackward()
+        {
+            // 左肘（T ポーズ -X, 外側 -Z）: 90° 曲げで前腕が前方 (+Z) へ曲がること
+            var leftElbow = JointFrameSolver.Solve(
+                JointId.LeftElbow,
+                new Vector3(-0.2f, 1.2f, 0f),
+                new Vector3(-0.45f, 1.2f, 0f),
+                new Vector3(-0.70f, 1.2f, 0f),
+                Vector3.forward,
+                Vector3.up);
+            Vector3 leftForearmBent = JointKeeperPreviewPose.ComputeFlexionRotation(leftElbow.HingeAxis, 90f) * leftElbow.LimbAxis;
+            Assert.Greater(Vector3.Dot(leftForearmBent.normalized, Vector3.forward), 0.999f);
+
+            // 右肘（T ポーズ +X, 外側 -Z）: 90° 曲げで前腕が前方 (+Z) へ曲がること
+            var rightElbow = JointFrameSolver.Solve(
+                JointId.RightElbow,
+                new Vector3(0.2f, 1.2f, 0f),
+                new Vector3(0.45f, 1.2f, 0f),
+                new Vector3(0.70f, 1.2f, 0f),
+                Vector3.forward,
+                Vector3.up);
+            Vector3 rightForearmBent = JointKeeperPreviewPose.ComputeFlexionRotation(rightElbow.HingeAxis, 90f) * rightElbow.LimbAxis;
+            Assert.Greater(Vector3.Dot(rightForearmBent.normalized, Vector3.forward), 0.999f);
+
+            // 膝（下向き -Y, 外側 +Z）: 90° 曲げで下腿が後方 (-Z) へ曲がること
+            var leftKnee = JointFrameSolver.Solve(
+                JointId.LeftKnee,
+                new Vector3(-0.1f, 0.9f, 0f),
+                new Vector3(-0.1f, 0.5f, 0f),
+                new Vector3(-0.1f, 0.1f, 0f),
+                Vector3.forward,
+                Vector3.up);
+            Vector3 leftShinBent = JointKeeperPreviewPose.ComputeFlexionRotation(leftKnee.HingeAxis, 90f) * leftKnee.LimbAxis;
+            Assert.Greater(Vector3.Dot(leftShinBent.normalized, Vector3.back), 0.999f);
         }
     }
 }
