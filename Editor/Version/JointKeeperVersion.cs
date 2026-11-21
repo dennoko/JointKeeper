@@ -179,6 +179,88 @@ namespace Dennokoworks.JointKeeper.Editor
             Application.OpenURL(url);
         }
 
+        /// <summary>
+        /// 現在選択されている表示言語に対応するユーザーマニュアル PDF をブラウザ等で開く。
+        /// </summary>
+        internal static void OpenUserManual()
+        {
+            string pdfPath = ResolveUserManualPdfPath(JointKeeperLocalization.IsJapanese);
+            if (string.IsNullOrEmpty(pdfPath) || !File.Exists(pdfPath))
+            {
+                Debug.LogWarning("[JointKeeper] ユーザーマニュアル PDF が見つかりませんでした。");
+                return;
+            }
+
+            try
+            {
+                string uri = new Uri(Path.GetFullPath(pdfPath)).AbsoluteUri;
+                Application.OpenURL(uri);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[JointKeeper] ユーザーマニュアルを開けませんでした ({pdfPath}): {e.Message}");
+            }
+        }
+
+        internal static string ResolveUserManualPdfPath(bool isJapanese)
+        {
+            string primary = isJapanese ? "user_manual_ja.pdf" : "user_manual_en.pdf";
+            string fallback = isJapanese ? "user_manual_en.pdf" : "user_manual_ja.pdf";
+
+            string path = FindManualPdfFile(primary);
+            if (!string.IsNullOrEmpty(path)) return path;
+
+            return FindManualPdfFile(fallback);
+        }
+
+        private static string FindManualPdfFile(string fileName)
+        {
+            // 1. スクリプト位置からパッケージルートを辿って Docs/ 配下を探索（他ツールとの誤検出を防ぐ）
+            string rootByScript = ResolvePackageRootByScriptPath();
+            if (!string.IsNullOrEmpty(rootByScript))
+            {
+                string candidate = Path.Combine(rootByScript, "Docs", fileName);
+                if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+            }
+
+            // 2. AssetDatabase から JointKeeper 配下の PDF を探索
+            string baseName = Path.GetFileNameWithoutExtension(fileName);
+            foreach (var guid in AssetDatabase.FindAssets(baseName))
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(assetPath)) continue;
+                if (!assetPath.EndsWith("/Docs/" + fileName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                string rootDir = assetPath.Substring(0, assetPath.Length - ("/Docs/" + fileName).Length);
+                if (!File.Exists(Path.Combine(rootDir, "Editor", "Version", "JointKeeperVersion.cs")) &&
+                    !File.Exists(Path.Combine(rootDir, "Runtime", "JointKeeperComponent.cs")))
+                    continue;
+
+                string full = Path.GetFullPath(assetPath);
+                if (File.Exists(full)) return full;
+            }
+
+            // 3. 既定の配置パス
+            string known = Path.GetFullPath(Path.Combine("Assets", "dennokoworks", "JointKeeper", "Docs", fileName));
+            return File.Exists(known) ? known : null;
+        }
+
+        private static string ResolvePackageRootByScriptPath([CallerFilePath] string scriptPath = null)
+        {
+            if (string.IsNullOrEmpty(scriptPath)) return null;
+            var dir = Path.GetDirectoryName(scriptPath);
+            for (int i = 0; i < 5 && !string.IsNullOrEmpty(dir); i++)
+            {
+                if (File.Exists(Path.Combine(dir, "version.json")) ||
+                    File.Exists(Path.Combine(dir, "Runtime", "JointKeeperComponent.cs")))
+                {
+                    return dir;
+                }
+                dir = Path.GetDirectoryName(dir);
+            }
+            return null;
+        }
+
         [Serializable]
         private class VersionInfo
         {

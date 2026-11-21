@@ -229,6 +229,14 @@ namespace Dennokoworks.JointKeeper.Editor
             }
 
             if (GUILayout.Button(
+                new GUIContent("?", JointKeeperLocalization.Tr("version.manual_tooltip")),
+                EditorStyles.miniButton,
+                GUILayout.Width(22f)))
+            {
+                JointKeeperVersion.OpenUserManual();
+            }
+
+            if (GUILayout.Button(
                 new GUIContent(JointKeeperLocalization.ButtonText, JointKeeperLocalization.ButtonTooltip),
                 EditorStyles.miniButton,
                 GUILayout.Width(28f)))

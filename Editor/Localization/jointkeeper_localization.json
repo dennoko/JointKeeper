@@ -31,6 +31,11 @@
       "en": "Recheck for updates"
     },
     {
+      "key": "version.manual_tooltip",
+      "ja": "ユーザーマニュアル (PDF) を開きます",
+      "en": "Open User Manual (PDF)"
+    },
+    {
       "key": "version.switch_language_tooltip",
       "ja": "表示言語を英語に切り替えます",
       "en": "Switch display language to Japanese"

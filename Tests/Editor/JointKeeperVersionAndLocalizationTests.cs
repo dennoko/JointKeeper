@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using Dennokoworks.JointKeeper.Editor;
 
@@ -22,6 +23,22 @@ namespace Dennokoworks.JointKeeper.Tests
         public void LocalVersion_ReadsVersionJson()
         {
             Assert.AreEqual("0.1.0", JointKeeperVersion.Current);
+        }
+
+        [Test]
+        public void UserManualPdf_ResolvesJointKeeperDocsByLanguage()
+        {
+            string jaPath = JointKeeperVersion.ResolveUserManualPdfPath(isJapanese: true);
+            string enPath = JointKeeperVersion.ResolveUserManualPdfPath(isJapanese: false);
+
+            Assert.IsFalse(string.IsNullOrEmpty(jaPath));
+            Assert.IsFalse(string.IsNullOrEmpty(enPath));
+            Assert.IsTrue(File.Exists(jaPath));
+            Assert.IsTrue(File.Exists(enPath));
+            Assert.AreEqual("user_manual_ja.pdf", Path.GetFileName(jaPath));
+            Assert.AreEqual("user_manual_en.pdf", Path.GetFileName(enPath));
+            StringAssert.Contains("JointKeeper", jaPath);
+            StringAssert.Contains("JointKeeper", enPath);
         }
 
         [Test]
