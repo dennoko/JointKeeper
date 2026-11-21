@@ -434,11 +434,6 @@ namespace Dennokoworks.JointKeeper.Editor
                 JointKeeperLocalization.Tr("bake.section_desc"),
                 EditorStyles.wordWrappedMiniLabel);
 
-            if (comp.ResolveTwistConfig(JointId.LeftElbow).enabled || comp.ResolveTwistConfig(JointId.RightElbow).enabled)
-            {
-                EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("bake.twist_not_supported_box"), MessageType.Warning);
-            }
-
             if (GUILayout.Button(JointKeeperLocalization.Content("bake.btn_bake", "bake.btn_bake_tooltip")))
             {
                 serializedObject.ApplyModifiedProperties();

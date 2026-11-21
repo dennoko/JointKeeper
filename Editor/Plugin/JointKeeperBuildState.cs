@@ -61,13 +61,30 @@ namespace Dennokoworks.JointKeeper.Editor
             Transform proximalSource,
             Transform distalSource)
         {
+            return GetOrCreateTwistBase(jointId, geometry, proximalSource, distalSource, out _, out _);
+        }
+
+        /// <summary>
+        /// 曲げ専用基準ボーン N を取得または生成し、新規生成有無と Aim ターゲットを返す（Bake 時の Undo/Revert 管理用）。
+        /// </summary>
+        public Transform GetOrCreateTwistBase(
+            JointId jointId,
+            in ForearmTwistGeometry geometry,
+            Transform proximalSource,
+            Transform distalSource,
+            out Transform createdAimTarget,
+            out bool wasCreated)
+        {
+            createdAimTarget = null;
+            wasCreated = false;
             var key = (jointId, proximalSource.GetInstanceID(), distalSource.GetInstanceID());
             if (_twistBases.TryGetValue(key, out Transform existing) && existing != null)
                 return existing;
 
             Transform created = ForearmTwistRigBuilder.CreateTwistBase(
-                jointId, geometry, proximalSource, distalSource, out _);
+                jointId, geometry, proximalSource, distalSource, out createdAimTarget);
             _twistBases[key] = created;
+            wasCreated = created != null;
             return created;
         }
 
@@ -81,6 +98,21 @@ namespace Dennokoworks.JointKeeper.Editor
             Transform distalSource,
             float k)
         {
+            return GetOrCreateTwistKnot(jointId, geometry, twistBase, distalSource, k, out _);
+        }
+
+        /// <summary>
+        /// 中間ボーン T_j（ロール追従率 k）を取得または生成し、新規生成有無を返す（Bake 時の Undo/Revert 管理用）。
+        /// </summary>
+        public Transform GetOrCreateTwistKnot(
+            JointId jointId,
+            in ForearmTwistGeometry geometry,
+            Transform twistBase,
+            Transform distalSource,
+            float k,
+            out bool wasCreated)
+        {
+            wasCreated = false;
             int baseId = twistBase.GetInstanceID();
             var key = (baseId, Mathf.RoundToInt(Mathf.Clamp01(k) * 10000f));
             if (_twistKnots.TryGetValue(key, out Transform existing) && existing != null)
@@ -92,6 +124,7 @@ namespace Dennokoworks.JointKeeper.Editor
             Transform created = ForearmTwistRigBuilder.CreateTwistKnot(
                 jointId, index, geometry, twistBase, distalSource, k, displayAxialRatio: k);
             _twistKnots[key] = created;
+            wasCreated = created != null;
             return created;
         }
     }

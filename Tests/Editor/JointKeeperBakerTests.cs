@@ -134,5 +134,53 @@ namespace Dennokoworks.JointKeeper.Tests
             Assert.AreEqual(avLower.transform, aL);
             Assert.AreEqual(avFoot.transform, aC);
         }
+
+        [Test]
+        public void BuildState_TwistBaseAndKnots_TrackCreatedAimTargetAndShareAcrossCalls()
+        {
+            var root = new GameObject("ArmRoot"); _created.Add(root);
+            var upper = new GameObject("UpperArm_L"); upper.transform.SetParent(root.transform, false);
+            upper.transform.position = new Vector3(-0.15f, 1.25f, 0f);
+            var lower = new GameObject("LowerArm_L"); lower.transform.SetParent(upper.transform, false);
+            lower.transform.position = new Vector3(-0.40f, 1.25f, 0f);
+            var hand = new GameObject("Hand_L"); hand.transform.SetParent(lower.transform, false);
+            hand.transform.position = new Vector3(-0.65f, 1.25f, 0f);
+
+            var frame = JointFrameSolver.Solve(
+                JointId.LeftElbow, upper.transform.position, lower.transform.position, hand.transform.position,
+                Vector3.forward, Vector3.up);
+            Assert.IsTrue(ForearmTwistGeometry.TryCompute(
+                lower.transform, hand.transform, null, frame.HingeAxis, frame.LimbLength,
+                out var geo, out _));
+
+            var state = new JointKeeperBuildState();
+            Transform base1 = state.GetOrCreateTwistBase(
+                JointId.LeftElbow, geo, upper.transform, lower.transform,
+                out Transform aim1, out bool baseCreated1);
+
+            Assert.IsTrue(baseCreated1);
+            Assert.IsNotNull(base1);
+            Assert.IsNotNull(aim1);
+            Assert.AreEqual(lower.transform, base1.parent);
+            Assert.AreEqual(lower.transform, aim1.parent);
+
+            Transform base2 = state.GetOrCreateTwistBase(
+                JointId.LeftElbow, geo, upper.transform, lower.transform,
+                out Transform aim2, out bool baseCreated2);
+
+            Assert.IsFalse(baseCreated2);
+            Assert.AreEqual(base1, base2);
+            Assert.IsNull(aim2);
+
+            Transform knot1 = state.GetOrCreateTwistKnot(
+                JointId.LeftElbow, geo, base1, lower.transform, 0.5f, out bool knotCreated1);
+            Transform knot2 = state.GetOrCreateTwistKnot(
+                JointId.LeftElbow, geo, base1, lower.transform, 0.5f, out bool knotCreated2);
+
+            Assert.IsTrue(knotCreated1);
+            Assert.IsFalse(knotCreated2);
+            Assert.AreEqual(knot1, knot2);
+            Assert.AreEqual(base1, knot1.parent);
+        }
     }
 }

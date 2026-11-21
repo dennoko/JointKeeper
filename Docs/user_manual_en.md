@@ -1,6 +1,5 @@
 # JointKeeper User Manual
 
-Version: v0.1.0  
 Requirements: Unity 2022.3 / VRChat SDK 3.7.0 or later / NDMF
 
 ---
@@ -86,7 +85,7 @@ Generates helper bones and `.asset` meshes directly in your project and swaps th
 - **Finalize & Remove Component**: Removes `JointKeeper` while keeping baked meshes and helper bones. `Revert` is no longer available afterward.
 - **Generated Assets & Helper Bones**: Lists created mesh assets and helper bones.
 
-Forearm Twist Distribution is not supported by Bake & Replace and is applied only during NDMF builds.
+Supports both elbow/knee volume preservation and Forearm Twist Distribution.
 
 ### 3.6 Language Switch and Version Check
 
