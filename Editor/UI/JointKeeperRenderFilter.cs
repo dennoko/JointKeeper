@@ -87,6 +87,7 @@ namespace Dennokoworks.JointKeeper.Editor
     {
         private sealed class RendererPreviewData
         {
+            public Mesh ObservedUpstreamMesh;
             public Mesh AfterMesh;
             public Mesh WeightHeatmapMesh;
             public Mesh DiagHeatmapMesh;
@@ -94,6 +95,7 @@ namespace Dennokoworks.JointKeeper.Editor
             public Transform[] AfterShadowBones;
             public Transform[] BeforeShadowBones;
             public Material[] HeatmapMaterials;
+            public bool HasJointKeeperOwnership;
             public bool HasJointKeeperChanges;
         }
 
@@ -109,6 +111,13 @@ namespace Dennokoworks.JointKeeper.Editor
         private readonly Dictionary<Renderer, RendererPreviewData> _dataByOriginal =
             new Dictionary<Renderer, RendererPreviewData>();
         private readonly List<Mesh> _createdMeshes = new List<Mesh>();
+        private readonly Dictionary<(SkinnedMeshRenderer, JointId), (JointConfig cfg, ForearmTwistConfig twist)> _ownership;
+        private readonly Dictionary<HumanBodyBones, Transform> _humanoidBones;
+        private readonly AvatarKinematicContext _kinematicCtx;
+        private readonly Dictionary<JointId, JointFrame> _baseFrames;
+        private readonly Dictionary<Transform, Transform> _aliasMap;
+        private readonly Dictionary<JointId, Vector3> _measuredAxes;
+        private readonly Dictionary<JointId, TwistAxisSample> _twistSamples;
         private Material _heatmapMaterial;
 
         public RenderAspects WhatChanged => RenderAspects.Mesh | RenderAspects.Shapes | RenderAspects.Material;
@@ -124,8 +133,8 @@ namespace Dennokoworks.JointKeeper.Editor
             if (animator == null) animator = avatarRoot.GetComponentInChildren<Animator>(true);
             if (animator == null) return;
 
-            var humanoidBones = HumanoidBoneResolver.ResolveAll(animator, out _);
-            if (humanoidBones.Count == 0) return;
+            _humanoidBones = HumanoidBoneResolver.ResolveAll(animator, out _);
+            if (_humanoidBones.Count == 0) return;
 
             var allComps = avatarRoot.GetComponentsInChildren<JointKeeperComponent>(true);
             var enabledComps = new List<JointKeeperComponent>();
@@ -140,71 +149,117 @@ namespace Dennokoworks.JointKeeper.Editor
             if (enabledComps.Count == 0) return;
 
             // Edit モード用 MA Merge Armature ボーン対応付け (§7.3)
-            var aliasMap = PreviewBoneResolver.BuildAliasMap(avatarRoot);
-            var kinematicCtx = AvatarKinematicContext.Build(avatarRoot, animator, humanoidBones);
-            var measuredAxes = JointKeeperPreviewState.GetCachedMeasuredAxes(avatarRoot);
-            var twistSamples = JointKeeperPreviewState.GetCachedTwistSamples(avatarRoot);
+            _aliasMap = PreviewBoneResolver.BuildAliasMap(avatarRoot);
+            _kinematicCtx = AvatarKinematicContext.Build(avatarRoot, animator, _humanoidBones);
+            _measuredAxes = JointKeeperPreviewState.GetCachedMeasuredAxes(avatarRoot);
+            _twistSamples = JointKeeperPreviewState.GetCachedTwistSamples(avatarRoot);
 
-            Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, avatarRoot.transform, out _, humanoidBones);
+            Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, avatarRoot.transform, out _, _humanoidBones);
             Vector3 avatarUp = avatarRoot.transform.up;
 
-            var baseFrames = new Dictionary<JointId, JointFrame>();
+            _baseFrames = new Dictionary<JointId, JointFrame>();
             foreach (var jointId in AllJoints)
             {
-                Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
-                Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
-                Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
+                Transform upper = HumanoidBoneResolver.GetBone(_humanoidBones, jointId.GetUpperHumanoidBone());
+                Transform lower = HumanoidBoneResolver.GetBone(_humanoidBones, jointId.GetLowerHumanoidBone());
+                Transform child = HumanoidBoneResolver.GetBone(_humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null) continue;
 
                 Vector3? childPos = child != null ? child.position : (Vector3?)null;
-                Vector3? measured = (measuredAxes != null && measuredAxes.TryGetValue(jointId, out var ax)) ? ax : (Vector3?)null;
-                baseFrames[jointId] = JointFrameSolver.Solve(
+                Vector3? measured = (_measuredAxes != null && _measuredAxes.TryGetValue(jointId, out var ax)) ? ax : (Vector3?)null;
+                _baseFrames[jointId] = JointFrameSolver.Solve(
                     jointId, upper.position, lower.position, childPos, avatarForward, avatarUp, measured);
             }
 
-            _pose = new JointKeeperPreviewPose(avatarRoot, humanoidBones, baseFrames, aliasMap);
+            _pose = new JointKeeperPreviewPose(avatarRoot, _humanoidBones, _baseFrames, _aliasMap);
             _heatmapMaterial = JointKeeperHeatmapDrawer.CreateHeatmapMaterial();
 
             // SMR ごとの適用設定を解決
-            var ownership = ResolvePreviewOwnership(enabledComps, avatarRoot.transform);
+            _ownership = ResolvePreviewOwnership(enabledComps, avatarRoot.transform);
 
-            foreach (var (orig, _) in proxyPairs)
+            foreach (var (orig, proxy) in proxyPairs)
             {
                 var smr = orig as SkinnedMeshRenderer;
+                var proxySmr = proxy as SkinnedMeshRenderer;
                 if (smr == null || smr.sharedMesh == null || smr.bones == null || smr.bones.Length == 0)
                     continue;
 
-                var data = BuildRendererPreviewData(smr, ownership, humanoidBones, kinematicCtx, baseFrames, aliasMap, measuredAxes, twistSamples);
+                var data = BuildRendererPreviewData(smr, proxySmr);
                 _dataByOriginal[orig] = data;
             }
         }
 
+        /// <summary>
+        /// 上流の NDMF プレビューフィルタ（MA MeshDeleter / ShapeChanger / DennokoMeshEditor 等）が
+        /// プロキシ SMR へ反映したメッシュと BlendShape ウェイトを取得する。
+        /// ボーン数や頂点ウェイトが不整合な場合のみ元のメッシュへ安全にフォールバックする。
+        /// </summary>
+        internal static Mesh SelectPreviewSourceMesh(
+            SkinnedMeshRenderer origSmr,
+            SkinnedMeshRenderer proxySmr,
+            out float[] blendShapeWeights)
+        {
+            blendShapeWeights = null;
+            if (origSmr == null) return null;
+
+            Transform[] origBones = origSmr.bones;
+            int origBoneCount = origBones != null ? origBones.Length : 0;
+
+            Mesh proxyMesh = proxySmr != null ? proxySmr.sharedMesh : null;
+            bool canUseProxyMesh = proxyMesh != null
+                && proxyMesh.isReadable
+                && proxyMesh.vertexCount > 0
+                && proxyMesh.bindposes != null
+                && proxyMesh.bindposes.Length == origBoneCount
+                && proxyMesh.boneWeights != null
+                && proxyMesh.boneWeights.Length == proxyMesh.vertexCount;
+
+            Mesh sourceMesh = canUseProxyMesh ? proxyMesh : origSmr.sharedMesh;
+            if (sourceMesh == null) return null;
+
+            SkinnedMeshRenderer bsSource = (canUseProxyMesh && proxySmr != null) ? proxySmr : origSmr;
+            int bsCount = sourceMesh.blendShapeCount;
+            if (bsCount > 0 && bsSource != null)
+            {
+                blendShapeWeights = new float[bsCount];
+                for (int i = 0; i < bsCount; i++)
+                    blendShapeWeights[i] = bsSource.GetBlendShapeWeight(i);
+            }
+
+            return sourceMesh;
+        }
+
         private RendererPreviewData BuildRendererPreviewData(
             SkinnedMeshRenderer smr,
-            Dictionary<(SkinnedMeshRenderer, JointId), (JointConfig cfg, ForearmTwistConfig twist)> ownership,
-            Dictionary<HumanBodyBones, Transform> humanoidBones,
-            AvatarKinematicContext kinematicCtx,
-            Dictionary<JointId, JointFrame> baseFrames,
-            Dictionary<Transform, Transform> aliasMap,
-            Dictionary<JointId, Vector3> measuredAxes,
-            Dictionary<JointId, TwistAxisSample> twistSamples)
+            SkinnedMeshRenderer proxySmr)
         {
+            bool hasOwnership = HasAnyOwnership(smr);
+            Mesh sourceMesh = SelectPreviewSourceMesh(smr, proxySmr, out float[] bsWeights);
+
             var data = new RendererPreviewData
             {
+                ObservedUpstreamMesh = proxySmr != null ? proxySmr.sharedMesh : sourceMesh,
                 BeforeShadowBones = _pose.MapBonesToShadow(smr.bones),
+                HasJointKeeperOwnership = hasOwnership,
             };
 
-            Mesh origMesh = smr.sharedMesh;
-            int vertCount = origMesh.vertexCount;
-            if (vertCount == 0 || origMesh.bindposes == null || origMesh.bindposes.Length == 0)
+            if (!hasOwnership || sourceMesh == null)
                 return data;
 
-            var scaleAdjusterMap = PreviewBoneResolver.CollectScaleAdjusterScales(smr.bones);
-            Vector3[] worldVerts = SkinningEvaluator.EvaluateWorldVerticesCpu(smr, scaleAdjusterMap);
+            int vertCount = sourceMesh.vertexCount;
+            if (vertCount == 0 || sourceMesh.bindposes == null || sourceMesh.bindposes.Length == 0
+                || sourceMesh.boneWeights == null || sourceMesh.boneWeights.Length != vertCount)
+            {
+                return data;
+            }
+
             Transform[] origBones = smr.bones;
+            var scaleAdjusterMap = PreviewBoneResolver.CollectScaleAdjusterScales(origBones);
+            Vector3[] worldVerts = SkinningEvaluator.EvaluateWorldVerticesCpu(
+                sourceMesh, origBones, bsWeights, null, null, scaleAdjusterMap);
             var workingBones = new List<Transform>(origBones);
-            var workingBindposes = new List<Matrix4x4>(origMesh.bindposes);
-            BoneWeight[] workingWeights = (BoneWeight[])origMesh.boneWeights.Clone();
+            var workingBindposes = new List<Matrix4x4>(sourceMesh.bindposes);
+            BoneWeight[] workingWeights = (BoneWeight[])sourceMesh.boneWeights.Clone();
             var combinedHelperWeights = new float[vertCount];
             var combinedTiers = new VertexSlotTier[vertCount];
             var combinedTau = new float[vertCount];
@@ -215,7 +270,7 @@ namespace Dennokoworks.JointKeeper.Editor
             Transform ResolveAlias(Transform t)
             {
                 if (t == null) return null;
-                return (aliasMap != null && aliasMap.TryGetValue(t, out var mapped)) ? mapped : t;
+                return (_aliasMap != null && _aliasMap.TryGetValue(t, out var mapped)) ? mapped : t;
             }
 
             Matrix4x4 SkinMatrix(int idx)
@@ -228,17 +283,17 @@ namespace Dennokoworks.JointKeeper.Editor
 
             foreach (var jointId in AllJoints)
             {
-                if (!ownership.TryGetValue((smr, jointId), out var owned))
+                if (!_ownership.TryGetValue((smr, jointId), out var owned))
                     continue;
-                if (!baseFrames.TryGetValue(jointId, out JointFrame baseFrame))
+                if (!_baseFrames.TryGetValue(jointId, out JointFrame baseFrame))
                     continue;
 
                 JointConfig cfg = owned.cfg;
                 ForearmTwistConfig twistCfg = owned.twist;
 
-                Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
-                Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
-                Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
+                Transform upper = HumanoidBoneResolver.GetBone(_humanoidBones, jointId.GetUpperHumanoidBone());
+                Transform lower = HumanoidBoneResolver.GetBone(_humanoidBones, jointId.GetLowerHumanoidBone());
+                Transform child = HumanoidBoneResolver.GetBone(_humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null) continue;
 
                 // 関節 × 機能単位の二重適用防止（ビルドと同じ判定）
@@ -250,8 +305,8 @@ namespace Dennokoworks.JointKeeper.Editor
                 JointFrame frame = baseFrame.WithOffsets(cfg.pivotOffset, cfg.outwardAngleOffset);
                 Transform[] bonesSnapshot = workingBones.ToArray();
                 var groups = TwistBoneClassifier.Classify(
-                    jointId, upper, lower, child, bonesSnapshot, cfg, kinematicCtx,
-                    workingWeights, worldVerts, frame, aliasMap);
+                    jointId, upper, lower, child, bonesSnapshot, cfg, _kinematicCtx,
+                    workingWeights, worldVerts, frame, _aliasMap);
 
                 if (groups.ProximalBoneIndices.Count == 0 || groups.DistalBoneIndices.Count == 0)
                     continue;
@@ -277,13 +332,13 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (twistOn && groups.DistalRigidBoneIndices.Count > 0)
                 {
                     BoneWeight[] twistInput = res != null ? res.NewWeights : workingWeights;
-                    var diag = ForearmTwistProcessor.Analyze(twistInput, bonesSnapshot, groups, kinematicCtx, ResolveAlias);
+                    var diag = ForearmTwistProcessor.Analyze(twistInput, bonesSnapshot, groups, _kinematicCtx, ResolveAlias);
                     bool blocked = diag.HasExistingTwistRig && !twistCfg.applyEvenIfExistingTwistRig;
 
                     Vector3? measuredRoll = null;
-                    if (twistSamples != null && twistSamples.TryGetValue(jointId, out var sample) && sample.HasAxis)
+                    if (_twistSamples != null && _twistSamples.TryGetValue(jointId, out var sample) && sample.HasAxis)
                         measuredRoll = sample.Axis;
-                    Vector3 hinge = (measuredAxes != null && measuredAxes.TryGetValue(jointId, out var h)) ? h : baseFrame.HingeAxis;
+                    Vector3 hinge = (_measuredAxes != null && _measuredAxes.TryGetValue(jointId, out var h)) ? h : baseFrame.HingeAxis;
 
                     if (!blocked && diag.RigidVertexCount > 0
                         && ForearmTwistGeometry.TryCompute(groups.DistalSource, child, measuredRoll, hinge, baseFrame.LimbLength, out twistGeo, out _))
@@ -391,7 +446,7 @@ namespace Dennokoworks.JointKeeper.Editor
             if (!anyModified)
                 return data;
 
-            Mesh afterMesh = UnityEngine.Object.Instantiate(origMesh);
+            Mesh afterMesh = UnityEngine.Object.Instantiate(sourceMesh);
             afterMesh.hideFlags = HideFlags.HideAndDontSave;
             afterMesh.bindposes = workingBindposes.ToArray();
             afterMesh.boneWeights = workingWeights;
@@ -412,7 +467,7 @@ namespace Dennokoworks.JointKeeper.Editor
             twistHm.colors = JointKeeperHeatmapDrawer.BuildTwistColors(combinedTau, combinedQuantized);
             _createdMeshes.Add(twistHm);
 
-            int subMeshCount = Mathf.Max(1, origMesh.subMeshCount);
+            int subMeshCount = Mathf.Max(1, sourceMesh.subMeshCount);
             var hmMats = new Material[subMeshCount];
             for (int i = 0; i < subMeshCount; i++)
                 hmMats[i] = _heatmapMaterial;
@@ -425,6 +480,46 @@ namespace Dennokoworks.JointKeeper.Editor
             data.HeatmapMaterials = hmMats;
             data.HasJointKeeperChanges = true;
             return data;
+        }
+
+        private bool HasAnyOwnership(SkinnedMeshRenderer smr)
+        {
+            if (smr == null || _ownership == null) return false;
+            for (int i = 0; i < AllJoints.Length; i++)
+            {
+                if (_ownership.ContainsKey((smr, AllJoints[i])))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsOwnGeneratedMesh(RendererPreviewData data, Mesh mesh)
+        {
+            return mesh != null && (
+                mesh == data.AfterMesh
+                || mesh == data.WeightHeatmapMesh
+                || mesh == data.DiagHeatmapMesh
+                || mesh == data.TwistHeatmapMesh);
+        }
+
+        private void DisposeRendererMeshes(RendererPreviewData data)
+        {
+            if (data == null) return;
+            DestroyTrackedMesh(data.AfterMesh);
+            DestroyTrackedMesh(data.WeightHeatmapMesh);
+            DestroyTrackedMesh(data.DiagHeatmapMesh);
+            DestroyTrackedMesh(data.TwistHeatmapMesh);
+            data.AfterMesh = null;
+            data.WeightHeatmapMesh = null;
+            data.DiagHeatmapMesh = null;
+            data.TwistHeatmapMesh = null;
+        }
+
+        private void DestroyTrackedMesh(Mesh mesh)
+        {
+            if (mesh == null) return;
+            _createdMeshes.Remove(mesh);
+            UnityEngine.Object.DestroyImmediate(mesh);
         }
 
         private static Dictionary<(SkinnedMeshRenderer, JointId), (JointConfig cfg, ForearmTwistConfig twist)> ResolvePreviewOwnership(
@@ -477,6 +572,23 @@ namespace Dennokoworks.JointKeeper.Editor
             var proxySmr = proxy as SkinnedMeshRenderer;
             if (proxySmr == null || !_dataByOriginal.TryGetValue(original, out var data))
                 return;
+
+            // 上流 NDMF メッシュ編集フィルタ（MA MeshDeleter / DennokoMeshEditor 等）が
+            // OnFrame で別のメッシュインスタンスへ差し替えた場合も追従して再構築する。
+            Mesh upstreamMesh = proxySmr.sharedMesh;
+            if (data.HasJointKeeperOwnership
+                && upstreamMesh != null
+                && upstreamMesh != data.ObservedUpstreamMesh
+                && !IsOwnGeneratedMesh(data, upstreamMesh))
+            {
+                var origSmr = original as SkinnedMeshRenderer;
+                if (origSmr != null && origSmr.bones != null && origSmr.bones.Length > 0)
+                {
+                    DisposeRendererMeshes(data);
+                    data = BuildRendererPreviewData(origSmr, proxySmr);
+                    _dataByOriginal[original] = data;
+                }
+            }
 
             // ProxyObjectController.OnPreFrame が毎フレーム元の Mesh / Materials / Bones を復元し、
             // 上流フィルタ（MA MeshDeleter / MaterialSetter / ScaleAdjuster 等）が適用された後に OnFrame が呼ばれる。

@@ -159,5 +159,57 @@ namespace Dennokoworks.JointKeeper.Tests
                 Assert.Less(Vector3.Distance(shadowHand.position, avShadowHand.position), 1e-4f);
             }
         }
+
+#if JOINT_KEEPER_NDMF
+        [Test]
+        public void SelectPreviewSourceMesh_PrefersUpstreamProxyMeshAndBlendShapes()
+        {
+            var bone = new GameObject("Bone0"); _created.Add(bone);
+            var origGo = new GameObject("OrigSmr"); _created.Add(origGo);
+            var proxyGo = new GameObject("ProxySmr"); _created.Add(proxyGo);
+
+            var origSmr = origGo.AddComponent<SkinnedMeshRenderer>();
+            var proxySmr = proxyGo.AddComponent<SkinnedMeshRenderer>();
+
+            var origMesh = new Mesh { name = "Orig" }; _created.Add(origMesh);
+            origMesh.vertices = new[] { Vector3.zero, Vector3.right, Vector3.up };
+            origMesh.bindposes = new[] { Matrix4x4.identity };
+            origMesh.boneWeights = new[]
+            {
+                new BoneWeight { boneIndex0 = 0, weight0 = 1f },
+                new BoneWeight { boneIndex0 = 0, weight0 = 1f },
+                new BoneWeight { boneIndex0 = 0, weight0 = 1f },
+            };
+            origMesh.AddBlendShapeFrame("Shrink", 100f, new[] { Vector3.zero, Vector3.zero, Vector3.zero }, null, null);
+
+            var editedMesh = Object.Instantiate(origMesh); _created.Add(editedMesh);
+            editedMesh.name = "EditedByUpstream";
+            editedMesh.vertices = new[] { Vector3.zero, Vector3.right * 0.5f, Vector3.up };
+
+            origSmr.bones = new[] { bone.transform };
+            origSmr.sharedMesh = origMesh;
+            origSmr.SetBlendShapeWeight(0, 0f);
+
+            proxySmr.bones = new[] { bone.transform };
+            proxySmr.sharedMesh = editedMesh;
+            proxySmr.SetBlendShapeWeight(0, 75f);
+
+            Mesh selected = JointKeeperRenderFilterNode.SelectPreviewSourceMesh(origSmr, proxySmr, out float[] bs);
+            Assert.AreEqual(editedMesh, selected);
+            Assert.IsNotNull(bs);
+            Assert.AreEqual(1, bs.Length);
+            Assert.AreEqual(75f, bs[0], 1e-4f);
+
+            // bindposes 長が一致しない異常メッシュの場合は安全に元メッシュへフォールバックすること
+            var mismatchMesh = Object.Instantiate(origMesh); _created.Add(mismatchMesh);
+            mismatchMesh.bindposes = new[] { Matrix4x4.identity, Matrix4x4.identity };
+            proxySmr.sharedMesh = mismatchMesh;
+
+            Mesh fallback = JointKeeperRenderFilterNode.SelectPreviewSourceMesh(origSmr, proxySmr, out float[] fallbackBs);
+            Assert.AreEqual(origMesh, fallback);
+            Assert.IsNotNull(fallbackBs);
+            Assert.AreEqual(0f, fallbackBs[0], 1e-4f);
+        }
+#endif
     }
 }
