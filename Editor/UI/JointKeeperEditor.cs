@@ -7,7 +7,8 @@ namespace Dennokoworks.JointKeeper.Editor
 {
     /// <summary>
     /// 段階的開示（Progressive Disclosure）を採用した JointKeeperComponent のカスタム Inspector (§7.1)。
-    /// 初期表示は「対象サマリー・部位トグル・強度/押し出し」のみとし、詳細項目は折りたたみ内に格納する。
+    /// DennokoMeshEditor に倣い、上部にバージョンチェックバーと言語切替（JA/EN）を配置し、
+    /// すべての設定項目にマウスオーバーツールチップを提供する。
     /// </summary>
     [CustomEditor(typeof(JointKeeperComponent))]
     internal sealed class JointKeeperEditor : UnityEditor.Editor
@@ -29,6 +30,9 @@ namespace Dennokoworks.JointKeeper.Editor
         private SerializedProperty _leftKnee;
         private SerializedProperty _rightKnee;
 
+        private DennokoVersionChecker.Result _versionResult;
+        private static GUIStyle _versionLinkStyle;
+
         private void OnEnable()
         {
             _targetMode = serializedObject.FindProperty("targetMode");
@@ -40,11 +44,36 @@ namespace Dennokoworks.JointKeeper.Editor
             _unlinkKnee = serializedObject.FindProperty("unlinkKneeLeftRight");
             _leftKnee = serializedObject.FindProperty("leftKnee");
             _rightKnee = serializedObject.FindProperty("rightKnee");
+
+            JointKeeperLocalization.OnLanguageChanged += OnLanguageChanged;
+
+            ReloadVersionResult();
+            JointKeeperVersion.StartCheckBackgroundTask();
+        }
+
+        private void OnDisable()
+        {
+            JointKeeperLocalization.OnLanguageChanged -= OnLanguageChanged;
+        }
+
+        private void OnLanguageChanged()
+        {
+            Repaint();
+        }
+
+        /// <summary>取得完了時に JointKeeperVersion から呼ばれる。</summary>
+        internal void ReloadVersionResult()
+        {
+            _versionResult = JointKeeperVersion.LoadResultFromSessionState();
+            Repaint();
         }
 
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
+
+            DrawVersionBar();
+            EditorGUILayout.Space(4f);
 
             var comp = (JointKeeperComponent)target;
             Animator avatarAnimator = FindAvatarAnimator(comp.transform);
@@ -57,16 +86,20 @@ namespace Dennokoworks.JointKeeper.Editor
                 EditorGUILayout.Space(4f);
                 if (DrawBakedStatusBox(comp))
                 {
-                    // コンポーネント削除時は即座に抜ける
                     return;
                 }
             }
 
             EditorGUILayout.Space(4f);
-            DrawSimpleJointControls("肘 (Elbows)", _leftElbow, _rightElbow, _unlinkElbow);
+            DrawSimpleJointControls(
+                "joint.elbows", "joint.elbows_tooltip",
+                _leftElbow, _rightElbow, _unlinkElbow);
             EditorGUILayout.Space(2f);
-            DrawSimpleJointControls("膝 (Knees)", _leftKnee, _rightKnee, _unlinkKnee);
+            DrawSimpleJointControls(
+                "joint.knees", "joint.knees_tooltip",
+                _leftKnee, _rightKnee, _unlinkKnee);
             EditorGUILayout.Space(4f);
+
             if (!comp.IsBaked)
             {
                 DrawPreviewControls(avatarRoot);
@@ -75,22 +108,33 @@ namespace Dennokoworks.JointKeeper.Editor
             }
 
             EditorGUILayout.Space(6f);
-            _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "詳細設定 (Advanced)", true, EditorStyles.foldoutHeader);
+            _showAdvanced = EditorGUILayout.Foldout(
+                _showAdvanced,
+                JointKeeperLocalization.Content("advanced.foldout", "advanced.foldout_tooltip"),
+                true,
+                EditorStyles.foldoutHeader);
+
             if (_showAdvanced)
             {
                 EditorGUI.indentLevel++;
                 DrawAdvancedTargetSettings();
                 EditorGUILayout.Space(4f);
-                DrawAdvancedJointSection("肘 (Elbows) 詳細", ref _showElbowAdvanced, _leftElbow, _rightElbow, _unlinkElbow, comp, isElbow: true);
+                DrawAdvancedJointSection("advanced.elbow_section", ref _showElbowAdvanced, _leftElbow, _rightElbow, _unlinkElbow, comp, isElbow: true);
                 EditorGUILayout.Space(2f);
-                DrawAdvancedJointSection("膝 (Knees) 詳細", ref _showKneeAdvanced, _leftKnee, _rightKnee, _unlinkKnee, comp, isElbow: false);
+                DrawAdvancedJointSection("advanced.knee_section", ref _showKneeAdvanced, _leftKnee, _rightKnee, _unlinkKnee, comp, isElbow: false);
                 EditorGUILayout.Space(4f);
-                _showSceneHandles = EditorGUILayout.ToggleLeft("Scene ビュー操作ハンドルを表示 (Pivot / Outward)", _showSceneHandles);
-                if (avatarRoot != null && GUILayout.Button("関節フレーム再計算（マッスル軸実測）"))
+
+                _showSceneHandles = EditorGUILayout.ToggleLeft(
+                    JointKeeperLocalization.Content("advanced.show_scene_handles", "advanced.show_scene_handles_tooltip"),
+                    _showSceneHandles);
+
+                if (avatarRoot != null
+                    && GUILayout.Button(JointKeeperLocalization.Content("advanced.resample_axes", "advanced.resample_axes_tooltip")))
                 {
                     JointKeeperPreviewState.ResampleMeasuredAxesSafe(avatarRoot.gameObject);
                     SceneView.RepaintAll();
                 }
+
                 DrawTwistDiagnostics(comp, avatarAnimator, avatarRoot);
                 EditorGUI.indentLevel--;
             }
@@ -98,55 +142,168 @@ namespace Dennokoworks.JointKeeper.Editor
             serializedObject.ApplyModifiedProperties();
         }
 
+        /// <summary>
+        /// 一番上の 1 行（DennokoMeshEditor 準拠）。
+        /// 左に現在バージョンと更新状態、右端に再確認ボタン（↻）と言語切替ボタン（EN/JA）。
+        /// </summary>
+        private void DrawVersionBar()
+        {
+            if (_versionLinkStyle == null)
+            {
+                _versionLinkStyle = new GUIStyle(EditorStyles.miniLabel);
+            }
+
+            var prevColor = GUI.contentColor;
+
+            EditorGUILayout.BeginHorizontal();
+
+            GUI.contentColor = new Color(0.68f, 0.68f, 0.68f);
+            GUILayout.Label($"v{_versionResult.LocalVersion}", EditorStyles.miniLabel, GUILayout.ExpandWidth(false));
+            GUI.contentColor = prevColor;
+
+            switch (_versionResult.State)
+            {
+                case DennokoVersionChecker.State.UpdateAvailable:
+                {
+                    var tooltip = string.IsNullOrEmpty(_versionResult.Message)
+                        ? JointKeeperLocalization.Tr("version.update_tooltip")
+                        : _versionResult.Message;
+
+                    GUI.contentColor = new Color(0.35f, 0.8f, 0.4f);
+                    var clicked = GUILayout.Button(
+                        new GUIContent(JointKeeperLocalization.Format("version.update_available", _versionResult.LatestVersion), tooltip),
+                        _versionLinkStyle,
+                        GUILayout.ExpandWidth(false));
+                    GUI.contentColor = prevColor;
+
+                    EditorGUIUtility.AddCursorRect(GUILayoutUtility.GetLastRect(), MouseCursor.Link);
+                    if (clicked)
+                    {
+                        JointKeeperVersion.OpenUpdatePage(_versionResult.Url);
+                    }
+                    break;
+                }
+
+                case DennokoVersionChecker.State.Error:
+                    GUI.contentColor = new Color(1f, 0.72f, 0.3f);
+                    GUILayout.Label(
+                        JointKeeperLocalization.Content("version.error", "version.error_tooltip"),
+                        EditorStyles.miniLabel,
+                        GUILayout.ExpandWidth(false));
+                    GUI.contentColor = prevColor;
+                    break;
+
+                case DennokoVersionChecker.State.Checking:
+                    GUI.contentColor = new Color(0.55f, 0.55f, 0.55f);
+                    GUILayout.Label(
+                        JointKeeperLocalization.Tr("version.checking"),
+                        EditorStyles.miniLabel,
+                        GUILayout.ExpandWidth(false));
+                    GUI.contentColor = prevColor;
+                    break;
+
+                default: // UpToDate
+                    break;
+            }
+
+            GUILayout.FlexibleSpace();
+
+            if (GUILayout.Button(
+                new GUIContent("↻", JointKeeperLocalization.Tr("version.recheck_tooltip")),
+                EditorStyles.miniButton,
+                GUILayout.Width(22f)))
+            {
+                JointKeeperVersion.ForceRecheck();
+                ReloadVersionResult();
+            }
+
+            if (GUILayout.Button(
+                new GUIContent(JointKeeperLocalization.ButtonText, JointKeeperLocalization.ButtonTooltip),
+                EditorStyles.miniButton,
+                GUILayout.Width(28f)))
+            {
+                JointKeeperLocalization.ToggleLanguage();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            var separator = EditorGUILayout.GetControlRect(false, 1f);
+            EditorGUI.DrawRect(separator, new Color(0f, 0f, 0f, 0.2f));
+        }
+
         private static void DrawPreviewControls(Transform avatarRoot)
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
-            bool nextEnabled = EditorGUILayout.ToggleLeft("Edit モード曲げプレビュー (NDMF Preview)", JointKeeperPreviewState.Enabled, EditorStyles.boldLabel);
+
+            bool nextEnabled = EditorGUILayout.ToggleLeft(
+                JointKeeperLocalization.Content("preview.toggle", "preview.toggle_tooltip"),
+                JointKeeperPreviewState.Enabled,
+                EditorStyles.boldLabel);
             if (nextEnabled != JointKeeperPreviewState.Enabled)
             {
                 JointKeeperPreviewState.SetEnabled(nextEnabled);
                 SceneView.RepaintAll();
             }
-            if (JointKeeperPreviewState.Enabled && GUILayout.Button("リセット", GUILayout.Width(64f)))
+
+            if (JointKeeperPreviewState.Enabled
+                && GUILayout.Button(
+                    JointKeeperLocalization.Content("preview.reset", "preview.reset_tooltip"),
+                    GUILayout.Width(64f)))
             {
                 JointKeeperPreviewState.ResetPose();
                 SceneView.RepaintAll();
             }
+
             EditorGUILayout.EndHorizontal();
 
             if (JointKeeperPreviewState.Enabled)
             {
                 EditorGUI.indentLevel++;
-                float nextBend = EditorGUILayout.Slider("曲げ角 (Bend °)", JointKeeperPreviewState.BendAngleDeg, 0f, 150f);
+
+                float nextBend = EditorGUILayout.Slider(
+                    JointKeeperLocalization.Content("preview.bend_angle", "preview.bend_angle_tooltip"),
+                    JointKeeperPreviewState.BendAngleDeg,
+                    0f,
+                    150f);
                 if (!Mathf.Approximately(nextBend, JointKeeperPreviewState.BendAngleDeg))
                 {
                     JointKeeperPreviewState.SetBendAngle(nextBend);
                     SceneView.RepaintAll();
                 }
 
-                float nextTwist = EditorGUILayout.Slider("前腕ツイスト (Twist °)", JointKeeperPreviewState.TwistAngleDeg, -90f, 90f);
+                float nextTwist = EditorGUILayout.Slider(
+                    JointKeeperLocalization.Content("preview.twist_angle", "preview.twist_angle_tooltip"),
+                    JointKeeperPreviewState.TwistAngleDeg,
+                    -90f,
+                    90f);
                 if (!Mathf.Approximately(nextTwist, JointKeeperPreviewState.TwistAngleDeg))
                 {
                     JointKeeperPreviewState.SetTwistAngle(nextTwist);
                     SceneView.RepaintAll();
                 }
 
-                bool nextBefore = EditorGUILayout.Toggle("適用前と比較 (Before 表示)", JointKeeperPreviewState.ShowBeforeOnly);
+                bool nextBefore = EditorGUILayout.Toggle(
+                    JointKeeperLocalization.Content("preview.show_before", "preview.show_before_tooltip"),
+                    JointKeeperPreviewState.ShowBeforeOnly);
                 if (nextBefore != JointKeeperPreviewState.ShowBeforeOnly)
                 {
                     JointKeeperPreviewState.SetShowBeforeOnly(nextBefore);
                     SceneView.RepaintAll();
                 }
 
-                var nextHm = (PreviewHeatmapMode)EditorGUILayout.EnumPopup("ヒートマップ表示", JointKeeperPreviewState.HeatmapMode);
+                var nextHm = (PreviewHeatmapMode)EditorGUILayout.EnumPopup(
+                    JointKeeperLocalization.Content("preview.heatmap", "preview.heatmap_tooltip"),
+                    JointKeeperPreviewState.HeatmapMode);
                 if (nextHm != JointKeeperPreviewState.HeatmapMode)
                 {
                     JointKeeperPreviewState.SetHeatmapMode(nextHm);
                     SceneView.RepaintAll();
                 }
+
                 EditorGUI.indentLevel--;
             }
+
             EditorGUILayout.EndVertical();
         }
 
@@ -173,26 +330,26 @@ namespace Dennokoworks.JointKeeper.Editor
             }
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("ベイク済み (Baked)", EditorStyles.boldLabel);
-            string info = $"メッシュ {meshCount} 件を差し替え、補助ボーン {helperCount} 本を生成済みです（影響頂点計 {totalVerts}）。\n"
-                        + "NDMF ビルドでは自動スキップされます。スライダーを変更した場合は「再ベイク」を押してください。";
+            EditorGUILayout.LabelField(JointKeeperLocalization.Tr("bake.baked_title"), EditorStyles.boldLabel);
+
+            string info = JointKeeperLocalization.Format("bake.baked_summary", meshCount, helperCount, totalVerts);
             if (rec != null && rec.bakedWithScaleAdjuster)
             {
-                info += "\n※ MA Scale Adjuster のスケールを反映してベイク済みです。Scale Adjuster を変更した場合は再ベイクしてください。";
+                info += JointKeeperLocalization.Tr("bake.baked_scale_adjuster_note");
             }
             EditorGUILayout.HelpBox(info, MessageType.Info);
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("再ベイク (Re-Bake)"))
+            if (GUILayout.Button(JointKeeperLocalization.Content("bake.btn_rebake", "bake.btn_rebake_tooltip")))
             {
                 serializedObject.ApplyModifiedProperties();
                 var res = JointKeeperBaker.BakeComponent(comp);
                 if (!res.Success)
-                    EditorUtility.DisplayDialog("JointKeeper 再ベイク", res.Message, "OK");
+                    EditorUtility.DisplayDialog(JointKeeperLocalization.Tr("bake.dialog_rebake_title"), res.Message, "OK");
                 serializedObject.Update();
                 SceneView.RepaintAll();
             }
-            if (GUILayout.Button("元に戻す (Revert)"))
+            if (GUILayout.Button(JointKeeperLocalization.Content("bake.btn_revert", "bake.btn_revert_tooltip")))
             {
                 serializedObject.ApplyModifiedProperties();
                 JointKeeperBaker.RevertComponent(comp, deleteGeneratedAssets: true);
@@ -201,13 +358,13 @@ namespace Dennokoworks.JointKeeper.Editor
             }
             EditorGUILayout.EndHorizontal();
 
-            if (GUILayout.Button("コンポーネントを削除して確定 (Revert 不可)"))
+            if (GUILayout.Button(JointKeeperLocalization.Content("bake.btn_finalize", "bake.btn_finalize_tooltip")))
             {
                 bool ok = EditorUtility.DisplayDialog(
-                    "JointKeeper コンポーネント削除",
-                    "ベイク済みメッシュと補助ボーンを残したまま JointKeeperComponent を削除します。\n削除後は「元に戻す」が使えなくなります（Unity の Undo でのみ戻せます）。続行しますか？",
-                    "削除して確定",
-                    "キャンセル");
+                    JointKeeperLocalization.Tr("bake.dialog_finalize_title"),
+                    JointKeeperLocalization.Tr("bake.dialog_finalize_body"),
+                    JointKeeperLocalization.Tr("bake.dialog_finalize_ok"),
+                    JointKeeperLocalization.Tr("bake.dialog_cancel"));
                 if (ok)
                 {
                     JointKeeperBaker.FinalizeAndRemoveComponent(comp);
@@ -215,7 +372,10 @@ namespace Dennokoworks.JointKeeper.Editor
                 }
             }
 
-            _showBakedAssets = EditorGUILayout.Foldout(_showBakedAssets, "生成済みアセット・補助ボーン一覧", true);
+            _showBakedAssets = EditorGUILayout.Foldout(
+                _showBakedAssets,
+                JointKeeperLocalization.Content("bake.generated_list", "bake.generated_list_tooltip"),
+                true);
             if (_showBakedAssets && rec != null)
             {
                 EditorGUI.indentLevel++;
@@ -240,7 +400,11 @@ namespace Dennokoworks.JointKeeper.Editor
                         {
                             var hb = rec.createdHelperBones[i];
                             if (hb == null) continue;
-                            EditorGUILayout.ObjectField($"補助ボーン {i + 1}", hb, typeof(GameObject), allowSceneObjects: true);
+                            EditorGUILayout.ObjectField(
+                                JointKeeperLocalization.Format("bake.helper_item", i + 1),
+                                hb,
+                                typeof(GameObject),
+                                allowSceneObjects: true);
                         }
                     }
                 }
@@ -254,18 +418,18 @@ namespace Dennokoworks.JointKeeper.Editor
         private void DrawBakeSection(JointKeeperComponent comp)
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("破壊的ベイク (Bake & Replace)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(JointKeeperLocalization.Tr("bake.section_title"), EditorStyles.boldLabel);
             EditorGUILayout.LabelField(
-                "他ツールとの競合回避や事前適用向け。元メッシュと同じフォルダに .asset を保存し、いつでも「元に戻す」できます。",
+                JointKeeperLocalization.Tr("bake.section_desc"),
                 EditorStyles.wordWrappedMiniLabel);
 
-            if (GUILayout.Button("ベイクして差し替え (Bake & Replace)"))
+            if (GUILayout.Button(JointKeeperLocalization.Content("bake.btn_bake", "bake.btn_bake_tooltip")))
             {
                 serializedObject.ApplyModifiedProperties();
                 var res = JointKeeperBaker.BakeComponent(comp);
                 if (!res.Success)
                 {
-                    EditorUtility.DisplayDialog("JointKeeper ベイク", res.Message, "OK");
+                    EditorUtility.DisplayDialog(JointKeeperLocalization.Tr("bake.dialog_title"), res.Message, "OK");
                 }
                 serializedObject.Update();
                 SceneView.RepaintAll();
@@ -282,9 +446,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 && (avatarAnimator.isHuman || (avatarAnimator.avatar != null && avatarAnimator.avatar.isValid && avatarAnimator.avatar.isHuman));
             if (!isHumanoid)
             {
-                EditorGUILayout.HelpBox(
-                    "親階層に Humanoid Animator が見つかりません。VRChat アバター配下の衣装オブジェクトにアタッチしてください。",
-                    MessageType.Warning);
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("status.no_animator"), MessageType.Warning);
                 return;
             }
 
@@ -294,26 +456,24 @@ namespace Dennokoworks.JointKeeper.Editor
             var targets = JointKeeperTargetCollector.CollectTargets(comp, avatarRoot);
             if (targets.Count == 0)
             {
-                EditorGUILayout.HelpBox(
-                    "配下に SkinnedMeshRenderer が見つかりません。衣装のルートオブジェクトまたは衣装メッシュに直接アタッチしてください。",
-                    MessageType.Warning);
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("status.no_targets"), MessageType.Warning);
             }
             else
             {
-                string summary = $"対象メッシュ: {targets.Count} 件（ビルド時に肘・膝の境界頂点があるメッシュのみ自動適用されます）";
-                EditorGUILayout.HelpBox(summary, MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    JointKeeperLocalization.Format("status.target_summary", targets.Count),
+                    MessageType.Info);
 
                 if (comp.transform == avatarRoot && comp.targetMode == TargetRendererMode.AutoDetect)
                 {
-                    EditorGUILayout.HelpBox(
-                        "アバタールートに配置されているため素体メッシュも対象に含まれます。素体を除外したい場合は「詳細設定 → 除外リスト」へ追加してください。",
-                        MessageType.None);
+                    EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("status.root_placement_note"), MessageType.None);
                 }
             }
         }
 
         private static void DrawSimpleJointControls(
-            string label,
+            string labelKey,
+            string tooltipKey,
             SerializedProperty leftProp,
             SerializedProperty rightProp,
             SerializedProperty unlinkProp)
@@ -326,31 +486,63 @@ namespace Dennokoworks.JointKeeper.Editor
 
             if (!isUnlinked)
             {
-                enabledProp.boolValue = EditorGUILayout.ToggleLeft(label, enabledProp.boolValue, EditorStyles.boldLabel);
+                enabledProp.boolValue = EditorGUILayout.ToggleLeft(
+                    JointKeeperLocalization.Content(labelKey, tooltipKey),
+                    enabledProp.boolValue,
+                    EditorStyles.boldLabel);
                 if (enabledProp.boolValue)
                 {
                     EditorGUI.indentLevel++;
-                    EditorGUILayout.Slider(leftProp.FindPropertyRelative("strength"), 0f, 1f, new GUIContent("強度 (Strength)"));
-                    EditorGUILayout.Slider(leftProp.FindPropertyRelative("pushAt90Deg"), -0.01f, 0.02f, new GUIContent("90° 押し出し量 (m)"));
+                    EditorGUILayout.Slider(
+                        leftProp.FindPropertyRelative("strength"),
+                        0f, 1f,
+                        JointKeeperLocalization.Content("joint.strength", "joint.strength_tooltip"));
+                    EditorGUILayout.Slider(
+                        leftProp.FindPropertyRelative("pushAt90Deg"),
+                        -0.01f, 0.02f,
+                        JointKeeperLocalization.Content("joint.push90", "joint.push90_tooltip"));
                     EditorGUI.indentLevel--;
                 }
             }
             else
             {
-                EditorGUILayout.LabelField($"{label}（左右個別設定中）", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(
+                    new GUIContent(
+                        JointKeeperLocalization.Format("joint.unlinked_suffix", JointKeeperLocalization.Tr(labelKey)),
+                        JointKeeperLocalization.Tr(tooltipKey)),
+                    EditorStyles.boldLabel);
                 EditorGUI.indentLevel++;
-                enabledProp.boolValue = EditorGUILayout.ToggleLeft("左 (Left)", enabledProp.boolValue);
+
+                enabledProp.boolValue = EditorGUILayout.ToggleLeft(
+                    JointKeeperLocalization.Content("joint.left", "joint.left_tooltip"),
+                    enabledProp.boolValue);
                 if (enabledProp.boolValue)
                 {
-                    EditorGUILayout.Slider(leftProp.FindPropertyRelative("strength"), 0f, 1f, new GUIContent("左 強度"));
-                    EditorGUILayout.Slider(leftProp.FindPropertyRelative("pushAt90Deg"), -0.01f, 0.02f, new GUIContent("左 90° 押し出し量 (m)"));
+                    EditorGUILayout.Slider(
+                        leftProp.FindPropertyRelative("strength"),
+                        0f, 1f,
+                        JointKeeperLocalization.Content("joint.left_strength", "joint.strength_tooltip"));
+                    EditorGUILayout.Slider(
+                        leftProp.FindPropertyRelative("pushAt90Deg"),
+                        -0.01f, 0.02f,
+                        JointKeeperLocalization.Content("joint.left_push90", "joint.push90_tooltip"));
                 }
-                rightEnabledProp.boolValue = EditorGUILayout.ToggleLeft("右 (Right)", rightEnabledProp.boolValue);
+
+                rightEnabledProp.boolValue = EditorGUILayout.ToggleLeft(
+                    JointKeeperLocalization.Content("joint.right", "joint.right_tooltip"),
+                    rightEnabledProp.boolValue);
                 if (rightEnabledProp.boolValue)
                 {
-                    EditorGUILayout.Slider(rightProp.FindPropertyRelative("strength"), 0f, 1f, new GUIContent("右 強度"));
-                    EditorGUILayout.Slider(rightProp.FindPropertyRelative("pushAt90Deg"), -0.01f, 0.02f, new GUIContent("右 90° 押し出し量 (m)"));
+                    EditorGUILayout.Slider(
+                        rightProp.FindPropertyRelative("strength"),
+                        0f, 1f,
+                        JointKeeperLocalization.Content("joint.right_strength", "joint.strength_tooltip"));
+                    EditorGUILayout.Slider(
+                        rightProp.FindPropertyRelative("pushAt90Deg"),
+                        -0.01f, 0.02f,
+                        JointKeeperLocalization.Content("joint.right_push90", "joint.push90_tooltip"));
                 }
+
                 EditorGUI.indentLevel--;
             }
 
@@ -359,20 +551,29 @@ namespace Dennokoworks.JointKeeper.Editor
 
         private void DrawAdvancedTargetSettings()
         {
-            EditorGUILayout.LabelField("対象メッシュ設定", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(_targetMode, new GUIContent("検出モード"));
+            EditorGUILayout.LabelField(JointKeeperLocalization.Tr("advanced.target_header"), EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(
+                _targetMode,
+                JointKeeperLocalization.Content("advanced.target_mode", "advanced.target_mode_tooltip"));
+
             if ((TargetRendererMode)_targetMode.enumValueIndex == TargetRendererMode.AutoDetect)
             {
-                EditorGUILayout.PropertyField(_excludedRenderers, new GUIContent("除外メッシュ (Excluded)"), true);
+                EditorGUILayout.PropertyField(
+                    _excludedRenderers,
+                    JointKeeperLocalization.Content("advanced.excluded_renderers", "advanced.excluded_renderers_tooltip"),
+                    true);
             }
             else
             {
-                EditorGUILayout.PropertyField(_targetRenderers, new GUIContent("対象メッシュ (Manual)"), true);
+                EditorGUILayout.PropertyField(
+                    _targetRenderers,
+                    JointKeeperLocalization.Content("advanced.target_renderers", "advanced.target_renderers_tooltip"),
+                    true);
             }
         }
 
         private void DrawAdvancedJointSection(
-            string title,
+            string titleKey,
             ref bool foldout,
             SerializedProperty leftProp,
             SerializedProperty rightProp,
@@ -380,18 +581,19 @@ namespace Dennokoworks.JointKeeper.Editor
             JointKeeperComponent comp,
             bool isElbow)
         {
-            foldout = EditorGUILayout.Foldout(foldout, title, true);
+            foldout = EditorGUILayout.Foldout(foldout, JointKeeperLocalization.Tr(titleKey), true);
             if (!foldout) return;
 
             EditorGUI.indentLevel++;
             bool prevUnlink = unlinkProp.boolValue;
-            bool nextUnlink = EditorGUILayout.Toggle(new GUIContent("左右個別に調整 (Unlink L/R)"), prevUnlink);
+            bool nextUnlink = EditorGUILayout.Toggle(
+                JointKeeperLocalization.Content("advanced.unlink_lr", "advanced.unlink_lr_tooltip"),
+                prevUnlink);
             if (nextUnlink != prevUnlink)
             {
                 unlinkProp.boolValue = nextUnlink;
                 if (nextUnlink)
                 {
-                    // リンク解除時に左側の数値設定をミラーコピーして右側へ反映 (§3.3)
                     serializedObject.ApplyModifiedProperties();
                     Undo.RecordObject(comp, "Unlink JointKeeper Left/Right");
                     if (isElbow) comp.rightElbow.CopyMirroredNumericsFrom(comp.leftElbow);
@@ -403,13 +605,13 @@ namespace Dennokoworks.JointKeeper.Editor
 
             if (!unlinkProp.boolValue)
             {
-                DrawDetailedJointFields(leftProp, "左右共通（左基準ミラー）");
+                DrawDetailedJointFields(leftProp, JointKeeperLocalization.Tr("advanced.lr_shared_header"));
             }
             else
             {
-                DrawDetailedJointFields(leftProp, "左 (Left)");
+                DrawDetailedJointFields(leftProp, JointKeeperLocalization.Tr("joint.left"));
                 EditorGUILayout.Space(2f);
-                DrawDetailedJointFields(rightProp, "右 (Right)");
+                DrawDetailedJointFields(rightProp, JointKeeperLocalization.Tr("joint.right"));
             }
             EditorGUI.indentLevel--;
         }
@@ -417,31 +619,74 @@ namespace Dennokoworks.JointKeeper.Editor
         private static void DrawDetailedJointFields(SerializedProperty prop, string header)
         {
             EditorGUILayout.LabelField(header, EditorStyles.miniBoldLabel);
-            EditorGUILayout.Slider(prop.FindPropertyRelative("bendFollowRatio"), 0.1f, 0.9f, new GUIContent("追従率 (Bend Follow Ratio)"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("blendCurvePower"), 1.0f, 3.0f, new GUIContent("分配カーブ指数 (Gamma)"));
-            EditorGUILayout.PropertyField(prop.FindPropertyRelative("pivotOffset"), new GUIContent("ピボット調整 (Axial, Out, Hinge)"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("outwardAngleOffset"), -90f, 90f, new GUIContent("外側方向オフセット (deg)"));
 
-            EditorGUILayout.Slider(prop.FindPropertyRelative("axialRadiusScale"), 0.05f, 1.0f, new GUIContent("軸方向影響半径 (肢長比)"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("radialRadiusScale"), 0.05f, 1.5f, new GUIContent("径方向影響半径 (肢長比)"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("innerFalloffRatio"), 0f, 0.95f, new GUIContent("減衰開始比"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("innerCutoff"), -1f, 1f, new GUIContent("内側カットオフ"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("outerFull"), -1f, 1f, new GUIContent("外側フル開始"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("innerRetention"), 0f, 0.5f, new GUIContent("内側最小維持率"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("bendFollowRatio"), 0.1f, 0.9f,
+                JointKeeperLocalization.Content("advanced.bend_follow_ratio", "advanced.bend_follow_ratio_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("blendCurvePower"), 1.0f, 3.0f,
+                JointKeeperLocalization.Content("advanced.blend_curve_power", "advanced.blend_curve_power_tooltip"));
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("pivotOffset"),
+                JointKeeperLocalization.Content("advanced.pivot_offset", "advanced.pivot_offset_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("outwardAngleOffset"), -90f, 90f,
+                JointKeeperLocalization.Content("advanced.outward_angle", "advanced.outward_angle_tooltip"));
 
-            EditorGUILayout.PropertyField(prop.FindPropertyRelative("autoDetectTwistBones"), new GUIContent("ツイストボーン自動分類"));
-            EditorGUILayout.PropertyField(prop.FindPropertyRelative("distalSourceMode"), new GUIContent("遠位ソースモード"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("axialRadiusScale"), 0.05f, 1.0f,
+                JointKeeperLocalization.Content("advanced.axial_radius", "advanced.axial_radius_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("radialRadiusScale"), 0.05f, 1.5f,
+                JointKeeperLocalization.Content("advanced.radial_radius", "advanced.radial_radius_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("innerFalloffRatio"), 0f, 0.95f,
+                JointKeeperLocalization.Content("advanced.inner_falloff", "advanced.inner_falloff_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("innerCutoff"), -1f, 1f,
+                JointKeeperLocalization.Content("advanced.inner_cutoff", "advanced.inner_cutoff_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("outerFull"), -1f, 1f,
+                JointKeeperLocalization.Content("advanced.outer_full", "advanced.outer_full_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("innerRetention"), 0f, 0.5f,
+                JointKeeperLocalization.Content("advanced.inner_retention", "advanced.inner_retention_tooltip"));
+
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("autoDetectTwistBones"),
+                JointKeeperLocalization.Content("advanced.auto_twist", "advanced.auto_twist_tooltip"));
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("distalSourceMode"),
+                JointKeeperLocalization.Content("advanced.distal_source_mode", "advanced.distal_source_mode_tooltip"));
             if ((DistalSourceMode)prop.FindPropertyRelative("distalSourceMode").enumValueIndex == DistalSourceMode.CustomOverride)
             {
-                EditorGUILayout.PropertyField(prop.FindPropertyRelative("distalSourceOverride"), new GUIContent("遠位ソース上書き"));
+                EditorGUILayout.PropertyField(
+                    prop.FindPropertyRelative("distalSourceOverride"),
+                    JointKeeperLocalization.Content("advanced.distal_source_override", "advanced.distal_source_override_tooltip"));
             }
-            EditorGUILayout.PropertyField(prop.FindPropertyRelative("extraProximalBones"), new GUIContent("手動追加: 近位ボーン (G_P)"), true);
-            EditorGUILayout.PropertyField(prop.FindPropertyRelative("extraDistalBones"), new GUIContent("手動追加: 遠位ボーン (G_D)"), true);
-            EditorGUILayout.PropertyField(prop.FindPropertyRelative("excludedBones"), new GUIContent("手動除外ボーン"), true);
 
-            EditorGUILayout.Slider(prop.FindPropertyRelative("minGroupWeightThreshold"), 0.001f, 0.25f, new GUIContent("境界判定閾値"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("slotSnapThreshold"), 0f, 0.15f, new GUIContent("4ボーン Tier2 吸収閾値"));
-            EditorGUILayout.Slider(prop.FindPropertyRelative("noisePruneThreshold"), 0f, 0.1f, new GUIContent("4ボーン Tier3 ノイズ閾値"));
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("extraProximalBones"),
+                JointKeeperLocalization.Content("advanced.extra_proximal", "advanced.extra_proximal_tooltip"),
+                true);
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("extraDistalBones"),
+                JointKeeperLocalization.Content("advanced.extra_distal", "advanced.extra_distal_tooltip"),
+                true);
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("excludedBones"),
+                JointKeeperLocalization.Content("advanced.excluded_bones", "advanced.excluded_bones_tooltip"),
+                true);
+
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("minGroupWeightThreshold"), 0.001f, 0.25f,
+                JointKeeperLocalization.Content("advanced.min_group_weight", "advanced.min_group_weight_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("slotSnapThreshold"), 0f, 0.15f,
+                JointKeeperLocalization.Content("advanced.slot_snap", "advanced.slot_snap_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("noisePruneThreshold"), 0f, 0.1f,
+                JointKeeperLocalization.Content("advanced.noise_prune", "advanced.noise_prune_tooltip"));
         }
 
         private void DrawTwistDiagnostics(
@@ -449,19 +694,22 @@ namespace Dennokoworks.JointKeeper.Editor
             Animator avatarAnimator,
             Transform avatarRoot)
         {
-            _showTwistDiagnostics = EditorGUILayout.Foldout(_showTwistDiagnostics, "ツイストボーン検出・診断", true);
+            _showTwistDiagnostics = EditorGUILayout.Foldout(
+                _showTwistDiagnostics,
+                JointKeeperLocalization.Content("diag.foldout", "diag.foldout_tooltip"),
+                true);
             if (!_showTwistDiagnostics) return;
 
             if (avatarAnimator == null)
             {
-                EditorGUILayout.HelpBox("Humanoid Animator が見つかりません。", MessageType.Info);
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("diag.no_animator"), MessageType.Info);
                 return;
             }
 
             var humanoidBones = HumanoidBoneResolver.ResolveAll(avatarAnimator, out _);
             if (humanoidBones.Count == 0)
             {
-                EditorGUILayout.HelpBox("Humanoid ボーンを解決できませんでした。", MessageType.Info);
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("diag.no_humanoid_bones"), MessageType.Info);
                 return;
             }
 
@@ -470,13 +718,14 @@ namespace Dennokoworks.JointKeeper.Editor
             var targets = JointKeeperTargetCollector.CollectTargets(comp, avatarRoot);
             if (targets.Count == 0)
             {
-                EditorGUILayout.LabelField("対象メッシュがありません。");
+                EditorGUILayout.LabelField(JointKeeperLocalization.Tr("diag.no_targets"));
                 return;
             }
 
-            // 代表として先頭 SMR の分類結果を表示
             SkinnedMeshRenderer sampleSmr = targets[0];
-            EditorGUILayout.LabelField($"診断サンプル: {sampleSmr.name}", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(
+                JointKeeperLocalization.Format("diag.sample_header", sampleSmr.name),
+                EditorStyles.miniBoldLabel);
 
             var joints = new[] { JointId.LeftElbow, JointId.RightElbow, JointId.LeftKnee, JointId.RightKnee };
             foreach (var jointId in joints)
@@ -496,7 +745,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 string pSrc = groups.ProximalSource != null ? groups.ProximalSource.name : "None";
                 string dSrc = groups.DistalSource != null ? groups.DistalSource.name : "None";
                 string depthNote = (groups.ProximalSourceIsConstraintDriven || groups.DistalSourceIsConstraintDriven)
-                    ? " [Source Constraint 駆動]"
+                    ? JointKeeperLocalization.Tr("diag.source_constrained")
                     : string.Empty;
 
                 EditorGUILayout.LabelField(

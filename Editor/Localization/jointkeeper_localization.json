@@ -1,0 +1,669 @@
+{
+  "entries": [
+    {
+      "key": "version.update_available",
+      "ja": "更新あり {0} ↗",
+      "en": "Update available {0} ↗"
+    },
+    {
+      "key": "version.update_tooltip",
+      "ja": "クリックでダウンロードページを開きます",
+      "en": "Click to open the releases page"
+    },
+    {
+      "key": "version.error",
+      "ja": "最新版を取得できません",
+      "en": "Failed to check update"
+    },
+    {
+      "key": "version.error_tooltip",
+      "ja": "↻ ボタンで再確認できます",
+      "en": "Click ↻ to retry checking for updates"
+    },
+    {
+      "key": "version.checking",
+      "ja": "確認中...",
+      "en": "Checking..."
+    },
+    {
+      "key": "version.recheck_tooltip",
+      "ja": "アップデートを再確認します",
+      "en": "Recheck for updates"
+    },
+    {
+      "key": "version.switch_language_tooltip",
+      "ja": "表示言語を英語に切り替えます",
+      "en": "Switch display language to Japanese"
+    },
+    {
+      "key": "status.no_animator",
+      "ja": "親階層に Humanoid Animator が見つかりません。VRChat アバター配下の衣装オブジェクトにアタッチしてください。",
+      "en": "No Humanoid Animator found in parent hierarchy. Attach this component to an outfit object under a VRChat avatar."
+    },
+    {
+      "key": "status.no_targets",
+      "ja": "配下に SkinnedMeshRenderer が見つかりません。衣装のルートオブジェクトまたは衣装メッシュに直接アタッチしてください。",
+      "en": "No SkinnedMeshRenderer found under this object. Attach to the outfit root or directly to an outfit mesh."
+    },
+    {
+      "key": "status.target_summary",
+      "ja": "対象メッシュ: {0} 件（ビルド時に肘・膝の境界頂点があるメッシュのみ自動適用されます）",
+      "en": "Target meshes: {0} (only meshes with elbow/knee boundary vertices will be processed on build)."
+    },
+    {
+      "key": "status.root_placement_note",
+      "ja": "アバタールートに配置されているため素体メッシュも対象に含まれます。素体を除外したい場合は「詳細設定 → 除外メッシュ」へ追加してください。",
+      "en": "Placed on the avatar root, so base body meshes are also included. Add body meshes to 'Advanced -> Excluded Renderers' if you want to skip them."
+    },
+    {
+      "key": "joint.elbows",
+      "ja": "肘 (Elbows)",
+      "en": "Elbows"
+    },
+    {
+      "key": "joint.elbows_tooltip",
+      "ja": "肘を曲げた際に袖の外側（肘頭側）が潰れて素体が貫通するのを防ぎます。",
+      "en": "Prevents elbow-side sleeves from collapsing and clipping through the body when bending the elbows."
+    },
+    {
+      "key": "joint.knees",
+      "ja": "膝 (Knees)",
+      "en": "Knees"
+    },
+    {
+      "key": "joint.knees_tooltip",
+      "ja": "膝を曲げた際にズボンやタイツの前面（膝頭側）が潰れて素体が貫通するのを防ぎます。",
+      "en": "Prevents knee-side pants or tights from collapsing and clipping through the body when bending the knees."
+    },
+    {
+      "key": "joint.unlinked_suffix",
+      "ja": "{0}（左右個別設定中）",
+      "en": "{0} (L/R Unlinked)"
+    },
+    {
+      "key": "joint.left",
+      "ja": "左 (Left)",
+      "en": "Left"
+    },
+    {
+      "key": "joint.left_tooltip",
+      "ja": "左側の関節に対するボリューム維持補正を有効にします。",
+      "en": "Enable volume-preservation correction for the left side."
+    },
+    {
+      "key": "joint.right",
+      "ja": "右 (Right)",
+      "en": "Right"
+    },
+    {
+      "key": "joint.right_tooltip",
+      "ja": "右側の関節に対するボリューム維持補正を有効にします。",
+      "en": "Enable volume-preservation correction for the right side."
+    },
+    {
+      "key": "joint.strength",
+      "ja": "強度 (Strength)",
+      "en": "Strength"
+    },
+    {
+      "key": "joint.strength_tooltip",
+      "ja": "補助ボーンへ移すウェイトの強さです（0: 効果なし / 1: 最大維持）。通常は 0.85 前後が自然でおすすめです。",
+      "en": "How strongly boundary weights are shifted to the helper bone (0: off, 1: maximum). Around 0.85 usually looks most natural."
+    },
+    {
+      "key": "joint.left_strength",
+      "ja": "左 強度",
+      "en": "Left Strength"
+    },
+    {
+      "key": "joint.right_strength",
+      "ja": "右 強度",
+      "en": "Right Strength"
+    },
+    {
+      "key": "joint.push90",
+      "ja": "90° 押し出し量 (m)",
+      "en": "Push at 90° (m)"
+    },
+    {
+      "key": "joint.push90_tooltip",
+      "ja": "関節を 90° 曲げたときに関節の外側（肘頭・膝頭方向）へ衣装を押し出す距離（メートル単位）です。素体がわずかに貫通する場合は 0.003〜0.006 程度まで上げてください。",
+      "en": "Outward displacement (in meters) at a 90° bend along the elbow/kneecap direction. Increase slightly (e.g., 0.003-0.006 m) if the body still pokes through."
+    },
+    {
+      "key": "joint.left_push90",
+      "ja": "左 90° 押し出し量 (m)",
+      "en": "Left Push at 90° (m)"
+    },
+    {
+      "key": "joint.right_push90",
+      "ja": "右 90° 押し出し量 (m)",
+      "en": "Right Push at 90° (m)"
+    },
+    {
+      "key": "preview.toggle",
+      "ja": "Edit モード曲げプレビュー (NDMF Preview)",
+      "en": "Edit Mode Bend Preview (NDMF Preview)"
+    },
+    {
+      "key": "preview.toggle_tooltip",
+      "ja": "シーン上の元ボーンを一切回転させず、Scene ビュー上で肘・膝を曲げた結果をリアルタイムに確認します。",
+      "en": "Previews bent elbows and knees live in Scene View via NDMF Preview without modifying actual scene transforms."
+    },
+    {
+      "key": "preview.reset",
+      "ja": "リセット",
+      "en": "Reset"
+    },
+    {
+      "key": "preview.reset_tooltip",
+      "ja": "曲げ角・ツイスト角・適用前比較表示を初期状態（0°）へ戻します。",
+      "en": "Resets bend angle, twist angle, and Before comparison mode back to 0°."
+    },
+    {
+      "key": "preview.bend_angle",
+      "ja": "曲げ角 (Bend °)",
+      "en": "Bend Angle (°)"
+    },
+    {
+      "key": "preview.bend_angle_tooltip",
+      "ja": "プレビュー上で肘と膝を曲げる角度です（0°〜150°）。",
+      "en": "Preview flexion angle for elbows and knees (0° to 150°)."
+    },
+    {
+      "key": "preview.twist_angle",
+      "ja": "前腕ツイスト (Twist °)",
+      "en": "Forearm Twist (°)"
+    },
+    {
+      "key": "preview.twist_angle_tooltip",
+      "ja": "プレビュー上で前腕をひねる角度です（-90°〜+90°）。ツイスト補助ボーンとの追従確認に使います。",
+      "en": "Preview forearm twist angle (-90° to +90°) to verify compatibility with twist bones."
+    },
+    {
+      "key": "preview.show_before",
+      "ja": "適用前と比較 (Before 表示)",
+      "en": "Compare Before (Original)"
+    },
+    {
+      "key": "preview.show_before_tooltip",
+      "ja": "ON にすると同じ曲げ角のまま JointKeeper 適用前の元メッシュを表示します。ON/OFF で効果を比較できます。",
+      "en": "Temporarily displays the original unmodified mesh at the same bend angle for A/B comparison."
+    },
+    {
+      "key": "preview.heatmap",
+      "ja": "ヒートマップ表示",
+      "en": "Heatmap View"
+    },
+    {
+      "key": "preview.heatmap_tooltip",
+      "ja": "補助ボーンのウェイト分布（HelperWeight）や、VRChat 4 ボーン制限の統合状態（FourBoneDiagnostics）をメッシュ上に色分け表示します。",
+      "en": "Color-codes helper bone weight distribution (HelperWeight) or VRChat 4-bone influence consolidation tiers (FourBoneDiagnostics) on the mesh."
+    },
+    {
+      "key": "bake.section_title",
+      "ja": "破壊的ベイク (Bake & Replace)",
+      "en": "Destructive Bake (Bake & Replace)"
+    },
+    {
+      "key": "bake.section_desc",
+      "ja": "他ツールとの競合回避や事前適用向け。元メッシュと同じフォルダに .asset を保存し、いつでも「元に戻す」できます。",
+      "en": "For avoiding conflicts with other NDMF tools or baking ahead of time. Saves .asset meshes next to the original mesh and can be reverted anytime."
+    },
+    {
+      "key": "bake.btn_bake",
+      "ja": "ベイクして差し替え (Bake & Replace)",
+      "en": "Bake & Replace"
+    },
+    {
+      "key": "bake.btn_bake_tooltip",
+      "ja": "現在の設定で補助ボーンとウェイト再計算済みメッシュ（.asset）を生成して差し替えます。完了後はコンポーネントが自動無効化され、NDMF ビルドで二重適用されません。",
+      "en": "Generates helper bones and baked .asset meshes with current settings and swaps them in. Disables this component afterward to prevent double application on build."
+    },
+    {
+      "key": "bake.baked_title",
+      "ja": "ベイク済み (Baked)",
+      "en": "Baked"
+    },
+    {
+      "key": "bake.baked_summary",
+      "ja": "メッシュ {0} 件を差し替え、補助ボーン {1} 本を生成済みです（影響頂点計 {2}）。\nNDMF ビルドでは自動スキップされます。スライダーを変更した場合は「再ベイク」を押してください。",
+      "en": "Replaced {0} mesh(es) and created {1} helper bone(s) ({2} affected vertices total).\nSkipped automatically during NDMF builds. Click 'Re-Bake' after changing sliders."
+    },
+    {
+      "key": "bake.baked_scale_adjuster_note",
+      "ja": "\n※ MA Scale Adjuster のスケールを反映してベイク済みです。Scale Adjuster を変更した場合は再ベイクしてください。",
+      "en": "\nNote: MA Scale Adjuster scales were baked into the bindposes. Re-Bake if you change Scale Adjuster later."
+    },
+    {
+      "key": "bake.btn_rebake",
+      "ja": "再ベイク (Re-Bake)",
+      "en": "Re-Bake"
+    },
+    {
+      "key": "bake.btn_rebake_tooltip",
+      "ja": "前回のベイク結果を一度元に戻してから、現在の設定で新しくベイクし直します。",
+      "en": "Reverts the previous bake and bakes again using the current settings."
+    },
+    {
+      "key": "bake.btn_revert",
+      "ja": "元に戻す (Revert)",
+      "en": "Revert"
+    },
+    {
+      "key": "bake.btn_revert_tooltip",
+      "ja": "元のメッシュとボーン配列を復元し、生成した補助ボーンと .asset ファイルを削除して非破壊モードへ戻します。",
+      "en": "Restores the original meshes and bone arrays, deletes generated helper bones and .asset files, and re-enables non-destructive mode."
+    },
+    {
+      "key": "bake.btn_finalize",
+      "ja": "コンポーネントを削除して確定 (Revert 不可)",
+      "en": "Finalize & Remove Component (Cannot Revert)"
+    },
+    {
+      "key": "bake.btn_finalize_tooltip",
+      "ja": "ベイク済みメッシュと補助ボーンを残したまま JointKeeperComponent のみを削除します。",
+      "en": "Removes JointKeeperComponent while keeping the baked meshes and helper bones permanently."
+    },
+    {
+      "key": "bake.dialog_title",
+      "ja": "JointKeeper ベイク",
+      "en": "JointKeeper Bake"
+    },
+    {
+      "key": "bake.dialog_rebake_title",
+      "ja": "JointKeeper 再ベイク",
+      "en": "JointKeeper Re-Bake"
+    },
+    {
+      "key": "bake.dialog_finalize_title",
+      "ja": "JointKeeper コンポーネント削除",
+      "en": "Remove JointKeeper Component"
+    },
+    {
+      "key": "bake.dialog_finalize_body",
+      "ja": "ベイク済みメッシュと補助ボーンを残したまま JointKeeperComponent を削除します。\n削除後は「元に戻す」が使えなくなります（Unity の Undo でのみ戻せます）。続行しますか？",
+      "en": "Remove JointKeeperComponent while keeping the baked meshes and helper bones?\nYou will no longer be able to use the Revert button afterward (only Unity Undo). Continue?"
+    },
+    {
+      "key": "bake.dialog_finalize_ok",
+      "ja": "削除して確定",
+      "en": "Remove & Finalize"
+    },
+    {
+      "key": "bake.dialog_cancel",
+      "ja": "キャンセル",
+      "en": "Cancel"
+    },
+    {
+      "key": "bake.generated_list",
+      "ja": "生成済みアセット・補助ボーン一覧",
+      "en": "Generated Assets & Helper Bones"
+    },
+    {
+      "key": "bake.generated_list_tooltip",
+      "ja": "ベイクで生成・差し替えられたメッシュアセットと補助ボーンの一覧です。クリックすると Project / Hierarchy 上でハイライトされます。",
+      "en": "Lists the baked mesh assets and created helper bones. Click any field to ping it in the Project or Hierarchy window."
+    },
+    {
+      "key": "bake.helper_item",
+      "ja": "補助ボーン {0}",
+      "en": "Helper Bone {0}"
+    },
+    {
+      "key": "bake.err_null",
+      "ja": "JointKeeperComponent が null です。",
+      "en": "JointKeeperComponent is null."
+    },
+    {
+      "key": "bake.err_no_animator",
+      "ja": "親階層に Humanoid Animator が見つかりません。VRChat アバター配下のオブジェクトにアタッチしてください。",
+      "en": "No Humanoid Animator found in parent hierarchy. Attach this component to an object under a VRChat avatar."
+    },
+    {
+      "key": "bake.err_no_humanoid_bones",
+      "ja": "Humanoid ボーンを解決できませんでした。Animator の Avatar 設定を確認してください。",
+      "en": "Failed to resolve Humanoid bones. Please verify the Avatar assigned to the Animator."
+    },
+    {
+      "key": "bake.err_no_joints_enabled",
+      "ja": "有効になっている関節（肘・膝）がありません。いずれかの部位を ON にしてください。",
+      "en": "No joints (elbows/knees) are enabled. Please enable at least one joint."
+    },
+    {
+      "key": "bake.err_no_targets",
+      "ja": "対象の SkinnedMeshRenderer が見つかりませんでした。",
+      "en": "No target SkinnedMeshRenderer was found."
+    },
+    {
+      "key": "bake.err_no_affected",
+      "ja": "対象メッシュに肘・膝の境界頂点が見つからなかったため、ベイクをスキップしました（Console の詳細ログを確認してください）。",
+      "en": "No elbow/knee boundary vertices were found on target meshes, so baking was skipped (check Console for details)."
+    },
+    {
+      "key": "bake.msg_complete",
+      "ja": "ベイク完了: メッシュ {0} 件を差し替え、補助ボーン {1} 本を生成しました（影響頂点計 {2}）。",
+      "en": "Bake complete: replaced {0} mesh(es) and created {1} helper bone(s) ({2} affected vertices total)."
+    },
+    {
+      "key": "bake.msg_scale_adjuster_note",
+      "ja": " (MA Scale Adjuster のスケールを反映済み。今後 Scale Adjuster を変更した場合は再ベイクしてください)",
+      "en": " (MA Scale Adjuster scales were applied; Re-Bake if you edit Scale Adjuster later)"
+    },
+    {
+      "key": "advanced.foldout",
+      "ja": "詳細設定 (Advanced)",
+      "en": "Advanced"
+    },
+    {
+      "key": "advanced.foldout_tooltip",
+      "ja": "対象メッシュの絞り込み、影響範囲（ROI）、ピボット微調整、ツイストボーン設定などの詳細項目を開きます。",
+      "en": "Expands advanced options including target mesh filtering, influence region (ROI), pivot offsets, and twist bone settings."
+    },
+    {
+      "key": "advanced.target_header",
+      "ja": "対象メッシュ設定",
+      "en": "Target Mesh Settings"
+    },
+    {
+      "key": "advanced.target_mode",
+      "ja": "検出モード",
+      "en": "Detection Mode"
+    },
+    {
+      "key": "advanced.target_mode_tooltip",
+      "ja": "AutoDetect: このオブジェクト配下の SkinnedMeshRenderer を自動検出します。\nManualList: 下のリストで明示的に指定したメッシュのみを対象にします。",
+      "en": "AutoDetect: automatically targets child SkinnedMeshRenderers.\nManualList: only processes meshes explicitly listed below."
+    },
+    {
+      "key": "advanced.excluded_renderers",
+      "ja": "除外メッシュ (Excluded)",
+      "en": "Excluded Renderers"
+    },
+    {
+      "key": "advanced.excluded_renderers_tooltip",
+      "ja": "AutoDetect モード時に処理対象から除外したい SkinnedMeshRenderer（素体メッシュなど）を指定します。",
+      "en": "SkinnedMeshRenderers to exclude when using AutoDetect mode (for example, base body meshes)."
+    },
+    {
+      "key": "advanced.target_renderers",
+      "ja": "対象メッシュ (Manual)",
+      "en": "Target Renderers (Manual)"
+    },
+    {
+      "key": "advanced.target_renderers_tooltip",
+      "ja": "ManualList モード時に処理対象とする SkinnedMeshRenderer を手動で指定します。",
+      "en": "SkinnedMeshRenderers to process explicitly when using ManualList mode."
+    },
+    {
+      "key": "advanced.elbow_section",
+      "ja": "肘 (Elbows) 詳細",
+      "en": "Elbows Advanced"
+    },
+    {
+      "key": "advanced.knee_section",
+      "ja": "膝 (Knees) 詳細",
+      "en": "Knees Advanced"
+    },
+    {
+      "key": "advanced.unlink_lr",
+      "ja": "左右個別に調整 (Unlink L/R)",
+      "en": "Unlink Left / Right"
+    },
+    {
+      "key": "advanced.unlink_lr_tooltip",
+      "ja": "OFF の間は左側の設定が右側へ自動ミラー適用されます。左右で非対称な衣装を調整したい場合に ON にしてください。",
+      "en": "When off, the right side automatically mirrors the left side. Enable to configure asymmetric left/right outfits independently."
+    },
+    {
+      "key": "advanced.lr_shared_header",
+      "ja": "左右共通（左基準ミラー）",
+      "en": "Shared L/R (Mirrored from Left)"
+    },
+    {
+      "key": "advanced.bend_follow_ratio",
+      "ja": "追従率 (Bend Follow Ratio)",
+      "en": "Bend Follow Ratio"
+    },
+    {
+      "key": "advanced.bend_follow_ratio_tooltip",
+      "ja": "補助ボーンが前腕・下腿の回転にどの割合で追従するかを設定します。0.5 で上肢と下肢のちょうど中間角度になります。",
+      "en": "Ratio at which the helper bone follows the lower limb rotation. 0.5 places it at the exact midpoint between upper and lower limbs."
+    },
+    {
+      "key": "advanced.blend_curve_power",
+      "ja": "分配カーブ指数 (Gamma)",
+      "en": "Blend Curve Power (Gamma)"
+    },
+    {
+      "key": "advanced.blend_curve_power_tooltip",
+      "ja": "関節中心から離れた頂点への補助ウェイト分配カーブの鋭さです。値を上げるほど関節の折り目付近だけに集中して効きます。",
+      "en": "Controls how sharply helper weight falls off away from the joint seam. Higher values concentrate the effect closer to the joint center."
+    },
+    {
+      "key": "advanced.pivot_offset",
+      "ja": "ピボット調整 (Axial, Out, Hinge)",
+      "en": "Pivot Offset (Axial, Out, Hinge)"
+    },
+    {
+      "key": "advanced.pivot_offset_tooltip",
+      "ja": "補助ボーンと影響範囲の中心位置をメートル単位で微調整します（X: 肢軸方向 / Y: 外側方向 / Z: ヒンジ軸方向）。",
+      "en": "Fine-tunes the helper pivot and influence center in meters (X: along limb axis, Y: outward, Z: along hinge axis)."
+    },
+    {
+      "key": "advanced.outward_angle",
+      "ja": "外側方向オフセット (deg)",
+      "en": "Outward Angle Offset (deg)"
+    },
+    {
+      "key": "advanced.outward_angle_tooltip",
+      "ja": "外側方向（肘頭・膝頭の向き・オレンジ矢印）を肢軸回りに回転調整します。向きが斜めにずれている場合に使います。",
+      "en": "Rotates the outward direction (orange arrow pointing out of the elbow/kneecap) around the limb axis in degrees."
+    },
+    {
+      "key": "advanced.axial_radius",
+      "ja": "軸方向影響半径 (肢長比)",
+      "en": "Axial Radius (Limb Ratio)"
+    },
+    {
+      "key": "advanced.axial_radius_tooltip",
+      "ja": "関節から腕・脚の長さ方向へどの範囲まで補正を効かせるか（肢長に対する比率）です。シアン楕円の上下幅に対応します。",
+      "en": "Influence radius along the limb length as a ratio of segment length. Corresponds to the vertical extent of the cyan ellipsoid."
+    },
+    {
+      "key": "advanced.radial_radius",
+      "ja": "径方向影響半径 (肢長比)",
+      "en": "Radial Radius (Limb Ratio)"
+    },
+    {
+      "key": "advanced.radial_radius_tooltip",
+      "ja": "関節の中心軸から太さ方向（外側・横方向）へどの範囲まで補正を効かせるか（肢長に対する比率）です。ゆったりした袖やワイドパンツでは大きめにします。",
+      "en": "Influence radius perpendicular to the limb axis as a ratio of segment length. Increase for baggy sleeves or wide pants."
+    },
+    {
+      "key": "advanced.inner_falloff",
+      "ja": "減衰開始比",
+      "en": "Inner Falloff Ratio"
+    },
+    {
+      "key": "advanced.inner_falloff_tooltip",
+      "ja": "影響範囲の端に向かって効果が弱まり始める境界位置（0〜0.95）です。Scene ビューの緑色の円がこの境界を表します。",
+      "en": "Normalized distance (0 to 0.95) where effect falloff begins toward the edge. Shown as the green circle in Scene View."
+    },
+    {
+      "key": "advanced.inner_cutoff",
+      "ja": "内側カットオフ",
+      "en": "Inner Cutoff"
+    },
+    {
+      "key": "advanced.inner_cutoff_tooltip",
+      "ja": "関節の内側（肘の内側・膝裏）で補正を最小まで絞る角度閾値（内積 -1〜1）です。値を上げるほど外側寄りに限定されます。",
+      "en": "Dot-product threshold (-1 to 1) where correction drops to minimum on the inner crease side. Higher values restrict correction more strictly to the outer side."
+    },
+    {
+      "key": "advanced.outer_full",
+      "ja": "外側フル開始",
+      "en": "Outer Full Threshold"
+    },
+    {
+      "key": "advanced.outer_full_tooltip",
+      "ja": "関節の外側（肘頭・膝頭側）で補正が 100% フルに効き始める角度閾値（内積 -1〜1）です。",
+      "en": "Dot-product threshold (-1 to 1) where outer-side correction reaches full 100% strength."
+    },
+    {
+      "key": "advanced.inner_retention",
+      "ja": "内側最小維持率",
+      "en": "Inner Min Retention"
+    },
+    {
+      "key": "advanced.inner_retention_tooltip",
+      "ja": "関節の内側（折り込まれる側）に残す最小の補正割合（0〜0.5）です。通常は 0 にして内側の折り込みを自然に保ちます。",
+      "en": "Minimum correction retained on the inner crease side (0 to 0.5). Keep near 0 so the inner bend folds naturally."
+    },
+    {
+      "key": "advanced.auto_twist",
+      "ja": "ツイストボーン自動分類",
+      "en": "Auto-Detect Twist Bones"
+    },
+    {
+      "key": "advanced.auto_twist_tooltip",
+      "ja": "前腕のツイスト補助ボーンや剛体子ボーンを親子関係と Constraint 依存から自動分類し、ねじれと曲げの両立を保ちます。",
+      "en": "Automatically classifies twist and rigid child bones from hierarchy and constraint dependencies to preserve forearm/leg twist."
+    },
+    {
+      "key": "advanced.distal_source_mode",
+      "ja": "遠位ソースモード",
+      "en": "Distal Source Mode"
+    },
+    {
+      "key": "advanced.distal_source_mode_tooltip",
+      "ja": "補助ボーンの Constraint が参照する下肢側ソースボーンの決定方式です。通常は AutoLowerHumanoid のままで問題ありません。",
+      "en": "How the lower-limb constraint source is chosen. Leave as AutoLowerHumanoid unless manual override is needed."
+    },
+    {
+      "key": "advanced.distal_source_override",
+      "ja": "遠位ソース上書き",
+      "en": "Distal Source Override"
+    },
+    {
+      "key": "advanced.distal_source_override_tooltip",
+      "ja": "遠位ソースモードが CustomOverride のときに参照する下肢側ボーンを手動指定します。",
+      "en": "Explicit lower-limb Transform to use when Distal Source Mode is set to CustomOverride."
+    },
+    {
+      "key": "advanced.extra_proximal",
+      "ja": "手動追加: 近位ボーン (G_P)",
+      "en": "Extra Proximal Bones (G_P)"
+    },
+    {
+      "key": "advanced.extra_proximal_tooltip",
+      "ja": "自動分類で拾えない特殊な上腕・太もも側補助ボーンを手動で近位グループ（G_P）へ追加します。",
+      "en": "Manually adds extra upper-arm / thigh helper bones into the proximal group (G_P)."
+    },
+    {
+      "key": "advanced.extra_distal",
+      "ja": "手動追加: 遠位ボーン (G_D)",
+      "en": "Extra Distal Bones (G_D)"
+    },
+    {
+      "key": "advanced.extra_distal_tooltip",
+      "ja": "自動分類で拾えない特殊な前腕・すね側補助ボーンを手動で遠位グループ（G_D）へ追加します。",
+      "en": "Manually adds extra forearm / shin helper bones into the distal group (G_D)."
+    },
+    {
+      "key": "advanced.excluded_bones",
+      "ja": "手動除外ボーン",
+      "en": "Excluded Bones"
+    },
+    {
+      "key": "advanced.excluded_bones_tooltip",
+      "ja": "ウェイト再分配の対象から除外したいボーン（揺れものや独立ギミック等）を手動指定します。",
+      "en": "Bones manually excluded from weight redistribution (such as dangling accessories or custom gimmicks)."
+    },
+    {
+      "key": "advanced.min_group_weight",
+      "ja": "境界判定閾値",
+      "en": "Boundary Weight Threshold"
+    },
+    {
+      "key": "advanced.min_group_weight_tooltip",
+      "ja": "近位（G_P）と遠位（G_D）の両方にこの値以上のウェイトを持つ頂点のみを関節境界として処理します。",
+      "en": "Vertices must have at least this weight on both proximal (G_P) and distal (G_D) groups to be treated as joint boundary vertices."
+    },
+    {
+      "key": "advanced.slot_snap",
+      "ja": "4ボーン Tier2 吸収閾値",
+      "en": "4-Bone Tier 2 Snap Threshold"
+    },
+    {
+      "key": "advanced.slot_snap_tooltip",
+      "ja": "VRChat の最大 4 ボーン制限に達した頂点で、残留関節ウェイトがこの値以下なら補助ボーンへ吸収してスロットを空けます。",
+      "en": "When a vertex hits VRChat's 4-bone limit, residual joint weights below this threshold are absorbed into the helper bone to free a slot."
+    },
+    {
+      "key": "advanced.noise_prune",
+      "ja": "4ボーン Tier3 ノイズ閾値",
+      "en": "4-Bone Tier 3 Noise Threshold"
+    },
+    {
+      "key": "advanced.noise_prune_tooltip",
+      "ja": "最大 4 ボーン制限に達した頂点で、この値以下の微小な外部ボーンウェイトをノイズとして整理し重要なボーンを保護します。",
+      "en": "When a vertex hits the 4-bone limit, tiny external weights below this threshold are pruned as noise to protect important bones."
+    },
+    {
+      "key": "advanced.show_scene_handles",
+      "ja": "Scene ビュー操作ハンドルを表示 (Pivot / Outward)",
+      "en": "Show Scene View Handles (Pivot / Outward)"
+    },
+    {
+      "key": "advanced.show_scene_handles_tooltip",
+      "ja": "Scene ビュー上に移動・回転ハンドルを表示し、ピボット位置や外側方向を視覚的にドラッグ調整できるようにします。",
+      "en": "Shows interactive Position and Rotation Disc handles in Scene View to visually adjust Pivot Offset and Outward Angle."
+    },
+    {
+      "key": "advanced.resample_axes",
+      "ja": "関節フレーム再計算（マッスル軸実測）",
+      "en": "Recalculate Joint Frames (Sample Muscle Axes)"
+    },
+    {
+      "key": "advanced.resample_axes_tooltip",
+      "ja": "一時クローン上で Humanoid マッスルをわずかに動かして実際の肘・膝ヒンジ軸を再実測します。",
+      "en": "Re-samples exact elbow and knee hinge axes from Humanoid muscles on a temporary hidden clone."
+    },
+    {
+      "key": "diag.foldout",
+      "ja": "ツイストボーン検出・診断",
+      "en": "Twist Bone Detection & Diagnostics"
+    },
+    {
+      "key": "diag.foldout_tooltip",
+      "ja": "対象メッシュのボーンが近位（G_P）・遠位（G_D）にどう分類され、どのソースボーンが参照されるかを確認できます。",
+      "en": "Shows how target mesh bones are classified into proximal (G_P) / distal (G_D) groups and which source bones drive the helper."
+    },
+    {
+      "key": "diag.no_animator",
+      "ja": "Humanoid Animator が見つかりません。",
+      "en": "No Humanoid Animator found."
+    },
+    {
+      "key": "diag.no_humanoid_bones",
+      "ja": "Humanoid ボーンを解決できませんでした。",
+      "en": "Failed to resolve Humanoid bones."
+    },
+    {
+      "key": "diag.no_targets",
+      "ja": "対象メッシュがありません。",
+      "en": "No target meshes."
+    },
+    {
+      "key": "diag.sample_header",
+      "ja": "診断サンプル: {0}",
+      "en": "Diagnostic Sample: {0}"
+    },
+    {
+      "key": "diag.source_constrained",
+      "ja": " [Source Constraint 駆動]",
+      "en": " [Constraint-Driven Source]"
+    }
+  ]
+}

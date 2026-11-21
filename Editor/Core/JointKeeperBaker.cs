@@ -45,7 +45,7 @@ namespace Dennokoworks.JointKeeper.Editor
         {
             if (comp == null)
             {
-                return new BakeResult { Success = false, Message = "JointKeeperComponent が null です。" };
+                return new BakeResult { Success = false, Message = JointKeeperLocalization.Tr("bake.err_null") };
             }
 
             Animator animator = FindAvatarAnimator(comp.transform);
@@ -54,7 +54,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 return new BakeResult
                 {
                     Success = false,
-                    Message = "親階層に Humanoid Animator が見つかりません。VRChat アバター配下のオブジェクトにアタッチしてください。",
+                    Message = JointKeeperLocalization.Tr("bake.err_no_animator"),
                 };
             }
 
@@ -65,7 +65,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 return new BakeResult
                 {
                     Success = false,
-                    Message = "Humanoid ボーンを解決できませんでした。Animator の Avatar 設定を確認してください。",
+                    Message = JointKeeperLocalization.Tr("bake.err_no_humanoid_bones"),
                 };
             }
 
@@ -82,7 +82,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 return new BakeResult
                 {
                     Success = false,
-                    Message = "有効になっている関節（肘・膝）がありません。いずれかの部位を ON にしてください。",
+                    Message = JointKeeperLocalization.Tr("bake.err_no_joints_enabled"),
                 };
             }
 
@@ -104,7 +104,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 return new BakeResult
                 {
                     Success = false,
-                    Message = "対象の SkinnedMeshRenderer が見つかりませんでした。",
+                    Message = JointKeeperLocalization.Tr("bake.err_no_targets"),
                 };
             }
 
@@ -344,7 +344,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 return new BakeResult
                 {
                     Success = false,
-                    Message = "対象メッシュに肘・膝の境界頂点が見つからなかったため、ベイクをスキップしました（Console の詳細ログを確認してください）。",
+                    Message = JointKeeperLocalization.Tr("bake.err_no_affected"),
                 };
             }
 
@@ -364,10 +364,11 @@ namespace Dennokoworks.JointKeeper.Editor
             Undo.CollapseUndoOperations(undoGroup);
             JointKeeperPreviewState.BumpStructureVersion();
 
-            string summary = $"ベイク完了: メッシュ {bakedRecords.Count} 件を差し替え、補助ボーン {createdHelpers.Count} 本を生成しました（影響頂点計 {totalAffectedVerts}）。";
+            string summary = JointKeeperLocalization.Format(
+                "bake.msg_complete", bakedRecords.Count, createdHelpers.Count, totalAffectedVerts);
             if (detectedAnyScaleAdjuster)
             {
-                summary += " (MA Scale Adjuster のスケールを反映済み。今後 Scale Adjuster を変更した場合は再ベイクしてください)";
+                summary += JointKeeperLocalization.Tr("bake.msg_scale_adjuster_note");
             }
             Debug.Log($"[JointKeeper] {summary}", comp);
 
