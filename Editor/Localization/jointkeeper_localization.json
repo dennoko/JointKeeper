@@ -664,6 +664,181 @@
       "key": "diag.source_constrained",
       "ja": " [Source Constraint 駆動]",
       "en": " [Constraint-Driven Source]"
+    },
+    {
+      "key": "twist.title",
+      "ja": "前腕ツイスト分散 (Forearm Twist)",
+      "en": "Forearm Twist Distribution"
+    },
+    {
+      "key": "twist.title_tooltip",
+      "ja": "腕をひねったときに肘で衣装が急にねじれるのを防ぎ、肘から手首にかけてなめらかにねじれるようにします。曲げ専用の基準ボーンと中間ツイストボーン（VRC Constraint 駆動）を追加し、前腕のウェイトを配分します。肘の補助ボーンと併用できます。",
+      "en": "Prevents the outfit from twisting abruptly at the elbow when the forearm rolls, spreading the twist smoothly from elbow to wrist. Adds a bend-only base bone and intermediate twist bones (driven by VRC Constraints) and redistributes forearm weights. Works together with the elbow helper bones."
+    },
+    {
+      "key": "twist.follow",
+      "ja": "ひねり追従率",
+      "en": "Twist Follow"
+    },
+    {
+      "key": "twist.left_follow",
+      "ja": "左 ひねり追従率",
+      "en": "Left Twist Follow"
+    },
+    {
+      "key": "twist.right_follow",
+      "ja": "右 ひねり追従率",
+      "en": "Right Twist Follow"
+    },
+    {
+      "key": "twist.follow_tooltip",
+      "ja": "手首側で袖が腕のひねりにどれだけ追従するかです（肘側は常に 0 = 曲げのみに追従）。1.0 なら手首は今と同じ動きのまま、肘のねじれだけが前腕全体に分散されます。0 にすると袖全体がひねりに追従せず、曲げだけに追従します。",
+      "en": "How much the sleeve follows the forearm roll at the wrist end (the elbow end is always 0 = bend only). At 1.0 the wrist moves as before and only the elbow twist is spread along the forearm. At 0 the whole sleeve ignores the roll and follows only the bend."
+    },
+    {
+      "key": "twist.recommend_note",
+      "ja": "推奨：手首から先（Hand 以降）にウェイトが乗っていない衣装（長袖・七分袖・アームカバーなど）。手袋・袖口が手の甲まで覆う衣装・素体メッシュでは、ひねり追従率を 1.0 のまま使ってください。",
+      "en": "Recommended for outfits with no weights beyond the wrist (long sleeves, 3/4 sleeves, arm covers). For gloves, sleeves covering the back of the hand, and base body meshes, keep Twist Follow at 1.0."
+    },
+    {
+      "key": "twist.warn_hand_weights",
+      "ja": "手首から先にもウェイトがあるメッシュがあります（{0}）。ひねり追従率が 1.0 未満のため、手首でねじれの段差が出ます。",
+      "en": "Some meshes also have weights beyond the wrist ({0}). Because Twist Follow is below 1.0, a twist step will appear at the wrist."
+    },
+    {
+      "key": "twist.warn_existing_rig",
+      "ja": "既存の前腕ツイストボーン（{1}）にウェイトが乗っているため、次のメッシュでは前腕ツイスト分散をスキップします：{0}",
+      "en": "Forearm twist distribution will be skipped for these meshes because they are weighted to existing forearm twist bones ({1}): {0}"
+    },
+    {
+      "key": "twist.warn_physbone",
+      "ja": "前腕に PhysBone があるメッシュがあります（{0}: {1}）。揺れる部分は元のロールで動き続けるため、まわりの袖とずれる場合があります。",
+      "en": "Some meshes have PhysBones on the forearm ({0}: {1}). The dangling parts keep following the original roll and may misalign with the surrounding sleeve."
+    },
+    {
+      "key": "twist.advanced_header",
+      "ja": "前腕ツイスト分散",
+      "en": "Forearm Twist Distribution"
+    },
+    {
+      "key": "twist.segments",
+      "ja": "区間数",
+      "en": "Segments"
+    },
+    {
+      "key": "twist.segments_tooltip",
+      "ja": "前腕を何区間に分けてねじれを分散するかです（中間ボーンは区間数 - 1 本）。3 で 90° ひねり時の細りは約 3.4%、2 で約 7.6% です。Constraint 数を減らしたい場合は 2 にしてください。",
+      "en": "Number of segments the twist is spread over (intermediate bones = segments - 1). With 3, the thinning at 90° roll is about 3.4%; with 2, about 7.6%. Use 2 to reduce the constraint count."
+    },
+    {
+      "key": "twist.start_ratio",
+      "ja": "分配開始位置",
+      "en": "Start Position"
+    },
+    {
+      "key": "twist.start_ratio_tooltip",
+      "ja": "ねじれの分配を始める位置（前腕長に対する比率、0 = 肘）。",
+      "en": "Where the twist distribution starts (ratio of forearm length, 0 = elbow)."
+    },
+    {
+      "key": "twist.end_ratio",
+      "ja": "分配終了位置",
+      "en": "End Position"
+    },
+    {
+      "key": "twist.end_ratio_tooltip",
+      "ja": "ねじれの分配を終える位置（前腕長に対する比率、1 = 手首）。開始位置 + 0.05 未満にはなりません。",
+      "en": "Where the twist distribution ends (ratio of forearm length, 1 = wrist). Never less than Start + 0.05."
+    },
+    {
+      "key": "twist.curve",
+      "ja": "分配カーブ",
+      "en": "Distribution Curve"
+    },
+    {
+      "key": "twist.curve_tooltip",
+      "ja": "肘から手首へのねじれの分布です。Linear（均等）が実際の前腕に近い形です。",
+      "en": "Distribution of the twist from elbow to wrist. Linear (uniform) is closest to a real forearm."
+    },
+    {
+      "key": "twist.curve_power",
+      "ja": "カーブ指数",
+      "en": "Curve Power"
+    },
+    {
+      "key": "twist.curve_power_tooltip",
+      "ja": "分配カーブが Power のときの指数です。大きいほど手首側に寄ります。",
+      "en": "Exponent used when the curve is Power. Higher values concentrate the twist toward the wrist."
+    },
+    {
+      "key": "twist.bend_only_helper",
+      "ja": "肘補助ボーンを曲げのみ追従にする",
+      "en": "Bend-Only Elbow Helper"
+    },
+    {
+      "key": "twist.bend_only_helper_tooltip",
+      "ja": "肘の補助ボーンが前腕のひねりを拾わないよう、曲げ専用の基準ボーンに追従させます（推奨）。",
+      "en": "Makes the elbow helper follow the bend-only base bone so it does not pick up forearm roll (recommended)."
+    },
+    {
+      "key": "twist.apply_existing",
+      "ja": "既存ツイストリグがあっても適用",
+      "en": "Apply Even With Existing Twist Rig"
+    },
+    {
+      "key": "twist.apply_existing_tooltip",
+      "ja": "既存の前腕ツイストボーン（Constraint 駆動）にウェイトが乗っているメッシュにも強制的に適用します。既存ボーンのウェイトは変更しません。",
+      "en": "Force-applies to meshes weighted to existing (constraint-driven) forearm twist bones. Weights on those bones are left unchanged."
+    },
+    {
+      "key": "twist.snap",
+      "ja": "ノット丸め閾値",
+      "en": "Knot Snap Threshold"
+    },
+    {
+      "key": "twist.snap_tooltip",
+      "ja": "ノット端にこの値以内で近い頂点は 1 本のボーンにまとめてスロットを節約します。大きいほど段差が出やすくなります。",
+      "en": "Vertices within this distance from a knot end are assigned to a single bone to save slots. Larger values make steps more visible."
+    },
+    {
+      "key": "twist.diag_line",
+      "ja": "{0} 前腕ツイスト: ロール軸={1}, LowerArm ロール={2}, lowerArmTwist={3}",
+      "en": "{0} Forearm Twist: roll axis={1}, LowerArm roll={2}, lowerArmTwist={3}"
+    },
+    {
+      "key": "twist.diag_axis_measured",
+      "ja": "実測",
+      "en": "measured"
+    },
+    {
+      "key": "twist.diag_axis_fallback",
+      "ja": "Hand 方向（未測定。「関節フレーム再計算」で測定できます）",
+      "en": "Hand direction (not measured; use 'Recalculate Joint Frames')"
+    },
+    {
+      "key": "twist.diag_roll_value",
+      "ja": "{0:F1}°/マッスル 1.0",
+      "en": "{0:F1}° per muscle 1.0"
+    },
+    {
+      "key": "twist.diag_roll_none",
+      "ja": "不明",
+      "en": "unknown"
+    },
+    {
+      "key": "twist.diag_roll_zero_warn",
+      "ja": "このアバターでは前腕をひねっても LowerArm がほとんどロールしないため、前腕ツイスト分散の効果はほぼありません。",
+      "en": "On this avatar the LowerArm barely rolls when the forearm twists, so forearm twist distribution will have little effect."
+    },
+    {
+      "key": "bake.twist_not_supported_box",
+      "ja": "前腕ツイスト分散は Bake & Replace に未対応です。Bake すると前腕ツイスト分散は適用されません（NDMF ビルド時のみ適用されます）。",
+      "en": "Forearm twist distribution is not supported by Bake & Replace. If you bake, forearm twist distribution will not be applied (it is applied only during NDMF builds)."
+    },
+    {
+      "key": "bake.msg_twist_not_supported",
+      "ja": "\n※ 前腕ツイスト分散は Bake に未対応のため適用されていません。",
+      "en": "\nNote: forearm twist distribution is not supported by Bake and was not applied."
     }
   ]
 }

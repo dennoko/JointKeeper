@@ -61,6 +61,8 @@
 | **ADR-06** | 関節ヒンジ軸の決定 | **Humanoid マッスル空間からの実測を第一優先**（rev.2）。`HumanPoseHandler` で `Forearm Stretch` / `Lower Leg Stretch` を微小変化させ、遠位ボーンの実回転軸を測定する。VRChat の IK・トラッキングはこの軸で肘・膝を曲げるため、押し出し方向とウェイトマスクの外側方向が一致する。測定不可時のみ従来の解剖学的プライオリ＋レスト曲がりへフォールバック（§5.2）。 |
 | **ADR-07** | 補助ボーン Bindpose | **評価姿勢での近位/遠位スキニング行列のブレンド**（rev.2）。$M_{\text{bind},H} = B_H^{-1}\,\mathrm{Lerp}(S_P, S_D, \alpha)$。衣装ボーンが bind pose から動かされている場合（非対応衣装のフィッティング、MA Merge Armature の bindpose 書き換え後など）でも、レスト姿勢のズレを一次近似でゼロに保つ（§5.3）。 |
 | **ADR-08** | Phase 2 プレビュー基盤 | **NDMF Preview System（`IRenderFilter`）を使用**（rev.2）。アバター全体の `HideAndDontSave` クローンと `AvatarProcessor.ProcessAvatar` を使う独自実装は採用しない（重い、他プラグインの副作用、MA のプレビューと競合するため）（§7.3）。 |
+| **ADR-09** | 前腕ツイスト分散のコンストレイント種別 | 曲げ専用基準ボーン N は `DistalSource` 配下の `VRCAimConstraint`（ADR-01 の例外）、中間ボーン $T_j$ は N と `DistalSource` の 2 ソース `VRCRotationConstraint`。詳細は [FEATURE_ForearmTwist.md](./FEATURE_ForearmTwist.md) §3.3・§4。 |
+| **ADR-10** | 前腕ツイスト有効時の肘補助ボーン遠位ソース | 肘補助ボーンの `DistalSource` を N に切り替え、肘まわりを「曲げのみに追従」で揃える（FEATURE_ForearmTwist §4.5）。 |
 
 ---
 

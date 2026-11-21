@@ -140,4 +140,85 @@ namespace Dennokoworks.JointKeeper
             };
         }
     }
+
+    /// <summary>
+    /// 前腕ツイスト分散の分配カーブ c(s)（FEATURE_ForearmTwist §5.2）。
+    /// </summary>
+    public enum TwistCurve
+    {
+        /// <summary>c(s) = s</summary>
+        Linear = 0,
+        /// <summary>c(s) = s^p</summary>
+        Power = 1,
+        /// <summary>c(s) = SmoothStep(0, 1, s)</summary>
+        SmoothStep = 2,
+    }
+
+    /// <summary>
+    /// 前腕ツイスト分散ボーン（肘専用）の設定 (FEATURE_ForearmTwist §6.1)。
+    /// 既定 OFF のため既存シーン・プレハブのビルド結果は変わらない。
+    /// </summary>
+    [Serializable]
+    public class ForearmTwistConfig
+    {
+        public bool enabled = false;
+
+        /// <summary>f: 手首端でのロール追従率（0 = 曲げのみ、1 = 手首で元どおり）。肘端は常に 0。</summary>
+        [Range(0f, 1f)]
+        public float twistFollow = 1.0f;
+
+        /// <summary>n: 区間数（中間ボーンは n-1 本、f &lt; 1 の場合は n 本）。</summary>
+        [Range(1, 4)]
+        public int segments = 3;
+
+        /// <summary>s_start: 分配開始位置（前腕長比）。</summary>
+        [Range(-0.3f, 0.5f)]
+        public float startRatio = 0.0f;
+
+        /// <summary>s_end: 分配終了位置（前腕長比）。</summary>
+        [Range(0.3f, 1.2f)]
+        public float endRatio = 1.0f;
+
+        public TwistCurve curve = TwistCurve.Linear;
+
+        [Range(1f, 3f)]
+        public float curvePower = 1.0f;
+
+        /// <summary>ADR-10: 肘補助ボーンの遠位ソースを曲げ専用基準ボーン N へ切り替える。</summary>
+        public bool bendOnlyElbowHelper = true;
+
+        /// <summary>SMR が既存の前腕ツイストリグ（Constraint 駆動の遠位ボーン）に乗っていても強制適用する。</summary>
+        public bool applyEvenIfExistingTwistRig = false;
+
+        /// <summary>補間係数 u がノット端からこの値以内なら単一ボーンへ丸めてスロットを節約する。</summary>
+        [Range(0f, 0.5f)]
+        public float twistSnapThreshold = 0.15f;
+
+        public const float MinRatioSpan = 0.05f;
+
+        /// <summary>endRatio が startRatio + MinRatioSpan 未満にならないよう補正した終了位置。</summary>
+        public float EffectiveEndRatio => Mathf.Max(endRatio, startRatio + MinRatioSpan);
+
+        public void CopyNumericsFrom(ForearmTwistConfig source)
+        {
+            if (source == null) return;
+            enabled = source.enabled;
+            twistFollow = source.twistFollow;
+            segments = source.segments;
+            startRatio = source.startRatio;
+            endRatio = source.endRatio;
+            curve = source.curve;
+            curvePower = source.curvePower;
+            bendOnlyElbowHelper = source.bendOnlyElbowHelper;
+            applyEvenIfExistingTwistRig = source.applyEvenIfExistingTwistRig;
+            twistSnapThreshold = source.twistSnapThreshold;
+        }
+
+        public ForearmTwistConfig Clone()
+        {
+            var c = new ForearmTwistConfig();
+            c.CopyNumericsFrom(this);
+            return c;
+        }
+    }
 }

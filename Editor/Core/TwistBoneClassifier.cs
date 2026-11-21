@@ -525,7 +525,57 @@ namespace Dennokoworks.JointKeeper.Editor
             result.ProximalSourceIsConstraintDriven = ctx.IsConstraintDriven(result.ProximalSource) || ctx.HasDormantConstraint(result.ProximalSource);
             result.DistalSourceIsConstraintDriven = ctx.IsConstraintDriven(result.DistalSource) || ctx.HasDormantConstraint(result.DistalSource);
 
+            // 9. 前腕ツイスト分散用: 剛体遠位ボーンと Constraint 駆動遠位ボーンの切り分け (FEATURE_ForearmTwist §5.1)
+            foreach (int idx in result.DistalBoneIndices)
+            {
+                Transform t = ResolveSmrBoneTransform(smrBones, idx, boneAliasMap);
+                if (t == null) continue;
+
+                if (IsRigidlyFollowing(t, result.DistalSource, ctx, boneAliasMap))
+                    result.DistalRigidBoneIndices.Add(idx);
+                else if (HasActiveConstraintOnPath(t, lower, ctx))
+                    result.ConstraintDrivenDistalBoneIndices.Add(idx);
+            }
+
             return result;
+        }
+
+        /// <summary>
+        /// bone が distalSource 自身、または distalSource から Constraint を介さず剛体追従する子孫かどうか。
+        /// </summary>
+        internal static bool IsRigidlyFollowing(
+            Transform bone,
+            Transform distalSource,
+            AvatarKinematicContext ctx,
+            Dictionary<Transform, Transform> boneAliasMap = null)
+        {
+            if (bone == null || distalSource == null) return false;
+            Transform cur = bone;
+            while (cur != null)
+            {
+                // Edit モードプレビューでは MA Merge Armature 前の衣装ボーンを統合先アバターボーンとして扱う
+                if (cur == distalSource
+                    || (boneAliasMap != null && boneAliasMap.TryGetValue(cur, out var mapped) && mapped == distalSource))
+                    return true;
+                if (ctx != null && ctx.IsConstraintDriven(cur)) return false;
+                cur = cur.parent;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// bone から stopAt（含まない）までの親チェーン上に、アクティブな Constraint が付いたボーンがあるか。
+        /// </summary>
+        private static bool HasActiveConstraintOnPath(Transform bone, Transform stopAt, AvatarKinematicContext ctx)
+        {
+            if (ctx == null) return false;
+            Transform cur = bone;
+            while (cur != null && cur != stopAt)
+            {
+                if (ctx.IsConstraintDriven(cur)) return true;
+                cur = cur.parent;
+            }
+            return false;
         }
 
         private static Transform ResolveSmrBoneTransform(

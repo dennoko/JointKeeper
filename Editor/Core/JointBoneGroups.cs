@@ -44,6 +44,18 @@ namespace Dennokoworks.JointKeeper.Editor
         public readonly HashSet<int> DistalBoneIndices = new HashSet<int>();
         public readonly HashSet<int> PrimaryHumanoidBoneIndices = new HashSet<int>();
 
+        /// <summary>
+        /// 前腕ツイスト分散の対象となる剛体遠位ボーン群 G_D^rigid（DistalSource 自身、
+        /// または DistalSource から Constraint を介さずに剛体追従する子孫）の smr.bones インデックス (FEATURE_ForearmTwist §5.1)。
+        /// </summary>
+        public readonly HashSet<int> DistalRigidBoneIndices = new HashSet<int>();
+
+        /// <summary>
+        /// Constraint 駆動の G_D ボーン（既存の LowerArm_Twist 等）の smr.bones インデックス。
+        /// 実ウェイトが乗っていれば既存前腕ツイストリグとして扱う (§8-B2)。
+        /// </summary>
+        public readonly HashSet<int> ConstraintDrivenDistalBoneIndices = new HashSet<int>();
+
         public int ProximalReferenceBoneIndex = -1;
         public int DistalReferenceBoneIndex = -1;
 

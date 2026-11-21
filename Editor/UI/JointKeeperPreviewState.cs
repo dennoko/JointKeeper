@@ -13,6 +13,7 @@ namespace Dennokoworks.JointKeeper.Editor
         Off = 0,
         HelperWeight = 1,
         FourBoneDiagnostics = 2,
+        TwistFollow = 3,
     }
 
     /// <summary>
@@ -40,6 +41,8 @@ namespace Dennokoworks.JointKeeper.Editor
 
         private static readonly Dictionary<int, Dictionary<JointId, Vector3>> MeasuredAxesCache =
             new Dictionary<int, Dictionary<JointId, Vector3>>();
+        private static readonly Dictionary<int, Dictionary<JointId, TwistAxisSample>> TwistSamplesCache =
+            new Dictionary<int, Dictionary<JointId, TwistAxisSample>>();
 
         public static void SetEnabled(bool value)
         {
@@ -103,6 +106,13 @@ namespace Dennokoworks.JointKeeper.Editor
             return MeasuredAxesCache.TryGetValue(avatarRoot.GetInstanceID(), out var dict) ? dict : null;
         }
 
+        /// <summary>前腕ロール軸の実測キャッシュ（未測定なら null）。</summary>
+        public static Dictionary<JointId, TwistAxisSample> GetCachedTwistSamples(GameObject avatarRoot)
+        {
+            if (avatarRoot == null) return null;
+            return TwistSamplesCache.TryGetValue(avatarRoot.GetInstanceID(), out var dict) ? dict : null;
+        }
+
         /// <summary>
         /// 元シーンを変更せず HideAndDontSave クローン上で HingeAxisSampler を実行して結果をキャッシュする (§7.3)。
         /// </summary>
@@ -116,8 +126,9 @@ namespace Dennokoworks.JointKeeper.Editor
             {
                 var anim = clone.GetComponent<Animator>();
                 if (anim == null) anim = clone.GetComponentInChildren<Animator>(true);
-                var sampled = HingeAxisSampler.SampleAll(anim);
+                var sampled = HingeAxisSampler.SampleAll(anim, null, out var twistSamples);
                 MeasuredAxesCache[avatarRoot.GetInstanceID()] = sampled;
+                TwistSamplesCache[avatarRoot.GetInstanceID()] = twistSamples;
 #if JOINT_KEEPER_NDMF
                 StructureVersionPublished.Value = StructureVersionPublished.Value + 1;
 #endif

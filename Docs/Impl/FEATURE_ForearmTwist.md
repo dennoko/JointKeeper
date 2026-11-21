@@ -1,6 +1,6 @@
 # FEATURE — 前腕ツイスト分散ボーン（Forearm Twist Distribution）検討書
 
-- **ステータス:** 検討（未実装）
+- **ステータス:** 初期実装済み（NDMF ビルド＋プレビュー。Bake は未対応）— 実装内容は [§13](#13-実装メモ初期実装) を参照
 - **作成日:** 2026-11-21
 - **関連:** [overview.md](./overview.md) / [ARCHITECTURE.md](./ARCHITECTURE.md)（ADR-01〜08、§5.1〜§5.5、§7.3）
 
@@ -23,6 +23,7 @@
 10. [テスト計画](#10-テスト計画)
 11. [実装前スパイク（要検証事項）](#11-実装前スパイク要検証事項)
 12. [残課題・確認事項](#12-残課題確認事項)
+13. [実装メモ（初期実装）](#13-実装メモ初期実装)
 
 ---
 
@@ -468,3 +469,49 @@ public ForearmTwistConfig rightForearmTwist = new ForearmTwistConfig();
 
 1. **スパイク S2 の結果に応じた $T_j$ コンストレイント種別の最終確定:** 3 DoF で軽量な `VRCRotationConstraint` を優先しつつ、実機・SDK 評価で問題が無いか確認する（§4.3）。
 2. **スパイク S1 の VR 実機確認:** 本アプローチ（`LowerArm` ロールの分散）で VR 上の見た目が狙いどおり改善するかを確認してから本実装へ進む。
+
+---
+
+## 13. 実装メモ（初期実装）
+
+### 13.1 実装範囲
+
+| 項目 | 状態 |
+| :--- | :--- |
+| NDMF ビルド（非破壊） | 実装済み。肘処理 → ツイスト処理の順で、N を先に生成して $H$ の遠位ソースにする（§8-B6） |
+| Edit モードプレビュー | 実装済み。影の $N$・$T_j$ を RigMath で評価。ヒートマップに `TwistFollow`（$\tau$、4 ボーン丸め頂点はマゼンタ）を追加 |
+| Bake & Replace | **未対応**（§1.4）。ツイストが有効なコンポーネントを Bake すると、Inspector と Bake 結果メッセージで「適用されない」旨を表示する |
+| 素体への適用 | 対象 SMR の扱いは肘・膝と同じ。素体と衣装で同じ設定なら $N$・$T_j$ を共有する |
+| 既存ツイストリグ | SMR の実ウェイト単位で検出し、スキップ＋警告（`applyEvenIfExistingTwistRig` で強制適用） |
+| 袖の PhysBone | 警告のみ |
+| 二重適用防止 | 生成ボーン名（`JK_Helper_{JointId}` / `JK_TwistBase_{JointId}` / `JK_Twist_{JointId}_*`）で「関節 × 機能」単位に判定。ビルド・プレビュー・Bake（肘補助のみ）で共通。マーカーコンポーネントは追加していない |
+
+### 13.2 確定した実装上の選択
+
+- **$T_j$ のコンストレイント:** `VRCRotationConstraint`（2 ソース、オフセット 0、`SolveInLocalSpace = false`）を採用（§4.3。S2 で挙動確認）。
+- **VRC SDK API（3.10.5 の DLL メタデータで確認済み）:** `VRCAimConstraint.AimAxis` / `UpAxis` / `WorldUp = VRCConstraintBase.WorldUpType.ObjectRotationUp` / `WorldUpVector` / `WorldUpTransform` / `RotationOffset` / `RotationAtRest`。
+- **ロール軸:** `HingeAxisSampler` が `Left/Right Forearm Twist In-Out` を微小変化させて実測し、前腕方向から 60° 以内なら採用、それ以外は Hand 方向（§4.6）。`humanDescription.lowerArmTwist`（文書中の `foreArmTwist` は Unity API では `lowerArmTwist`）と「マッスル 1.0 あたりのロール角」を Inspector の診断に表示する。
+- **ヒンジ軸:** 実測ヒンジ軸（生の $\hat{h}$）を優先し、未測定時は `JointFrame.HingeAxis`。
+- **剛体遠位 $G_D^{\text{rigid}}$:** `DistalSource` 自身、または `DistalSource` から Constraint を介さずに追従する子孫（APS のポーズラッパーが `DistalSource` に昇格した場合も、その配下だけを対象にする）。
+- **最上位ノット:** $f = 1$ のとき、SMR が `DistalSource` を既に参照していればそのインデックスを使い、無ければ `DistalSource` をボーン配列に追加する。
+- **遅延生成:** 変更頂点から参照されたノットのボーンだけを生成・追加する（未使用ノットのプレースホルダーは詰める）。
+- **`twistSnapThreshold` の既定値:** 文書どおり 0.15。値が大きいほどスロットを節約できる一方、段差が出やすくなる。実機で段差が目立つ場合は 0〜0.05 に下げる。
+
+### 13.3 追加ファイル
+
+| ファイル | 役割 |
+| :--- | :--- |
+| `Editor/Core/ForearmTwistRedistributor.cs` | §5 の純粋計算（ノット補間・4 ボーン丸め・プレースホルダー付け替え） |
+| `Editor/Core/ForearmTwistRigBuilder.cs` | `ForearmTwistGeometry`（ロール軸・ヒンジ軸・前腕長）と N / T_j / Aim ターゲットの生成 |
+| `Editor/Core/ForearmTwistProcessor.cs` | ビルド・プレビュー共通の診断（既存リグ・Hand ウェイト・前腕 PhysBone）・計画・確定 |
+| `Editor/Core/JointKeeperGeneratedNames.cs` | 生成ボーン名の規約と二重適用判定 |
+| `Tests/Editor/ForearmTwistRedistributorTests.cs` | 不変条件 11・12、外部ボーンのビット単位保持、4 ボーン丸め、シーム一貫性 ほか |
+| `Tests/Editor/ForearmTwistRigMathTests.cs` | 不変条件 13（純粋曲げで偽ロール 0、ロール除去、$T_j = \Delta_N R(\hat{a}, k\varphi)$）、分類・診断・名前判定・左右リンク |
+
+### 13.4 検証状況
+
+- Unity 外（`dotnet build`）で Runtime / Editor / Tests の 3 アセンブリがエラー 0 でコンパイルできることを確認済み。
+- `ForearmTwistRedistributor` の純粋計算は、NUnit を使わないハーネスで単体テストと同じケースに加え、ランダム 20,000 頂点の不変条件（総和保存・4 本以下・外部ボーン不変・隣接ノット）を確認済み。
+- Quaternion・GameObject を使うテスト（RigMath の Aim 等価評価・分類器）は Unity ネイティブが必要なので、**Unity Test Runner（EditMode）で実行が必要**。
+- 実機確認（スパイク S1・S2）は未実施。
+

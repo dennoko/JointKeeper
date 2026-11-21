@@ -19,6 +19,7 @@ namespace Dennokoworks.JointKeeper.Editor
         {
             public JointKeeperComponent Component;
             public JointConfig Config;
+            public ForearmTwistConfig TwistConfig;
             public bool IsManual;
             public int HierarchyDepth;
             public int ScanOrder;
@@ -73,7 +74,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 var kinematicCtx = AvatarKinematicContext.Build(context.AvatarRootObject, animator, humanoidBones);
 
                 // 2b. 関節ごとのベース JointFrame を 1 回だけ算出 (ADR-06)
-                var measuredAxes = HingeAxisSampler.SampleAll(animator, humanoidBones);
+                var measuredAxes = HingeAxisSampler.SampleAll(animator, humanoidBones, out var twistSamples);
                 Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, context.AvatarRootTransform, out string fwdWarning, humanoidBones);
                 if (!string.IsNullOrEmpty(fwdWarning))
                     Debug.LogWarning($"[JointKeeper] {fwdWarning}", context.AvatarRootObject);
@@ -124,7 +125,7 @@ namespace Dennokoworks.JointKeeper.Editor
 
                 foreach (var smrEntry in bySmr)
                 {
-                    int affected = ProcessRenderer(context, smrEntry.Key, smrEntry.Value, humanoidBones, kinematicCtx, baseFrames, buildState);
+                    int affected = ProcessRenderer(context, smrEntry.Key, smrEntry.Value, humanoidBones, kinematicCtx, baseFrames, measuredAxes, twistSamples, buildState);
                     if (affected > 0)
                     {
                         modifiedSmrCount++;
@@ -133,7 +134,7 @@ namespace Dennokoworks.JointKeeper.Editor
                 }
 
                 Debug.Log(
-                    $"[JointKeeper] ビルド適用完了: 対象 SMR {bySmr.Count} 件中 {modifiedSmrCount} 件を更新, 生成補助ボーン {buildState.CreatedBoneCount} 本, 影響頂点計 {totalAffectedVerts}",
+                    $"[JointKeeper] ビルド適用完了: 対象 SMR {bySmr.Count} 件中 {modifiedSmrCount} 件を更新, 生成補助ボーン {buildState.CreatedBoneCount} 本, 前腕ツイストボーン {buildState.CreatedTwistBoneCount} 本, 影響頂点計 {totalAffectedVerts}",
                     context.AvatarRootObject);
             }
             finally
@@ -154,6 +155,8 @@ namespace Dennokoworks.JointKeeper.Editor
             Dictionary<HumanBodyBones, Transform> humanoidBones,
             AvatarKinematicContext kinematicCtx,
             Dictionary<JointId, JointFrame> baseFrames,
+            Dictionary<JointId, Vector3> measuredAxes,
+            Dictionary<JointId, TwistAxisSample> twistSamples,
             JointKeeperBuildState buildState)
         {
             if (smr == null || smr.sharedMesh == null)
@@ -204,24 +207,44 @@ namespace Dennokoworks.JointKeeper.Editor
 
             assignments.Sort((a, b) => a.jointId.CompareTo(b.jointId));
 
+            bool[] combinedModified = new bool[origWeights.Length];
+
             foreach (var (jointId, owned) in assignments)
             {
                 if (!baseFrames.TryGetValue(jointId, out JointFrame baseFrame))
                     continue;
 
                 JointConfig cfg = owned.Config;
+                ForearmTwistConfig twistCfg = owned.TwistConfig;
                 Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
                 Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
                 Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null)
                     continue;
 
+                // 関節 × 機能単位の二重適用防止 (FEATURE_ForearmTwist §1.5)
+                bool elbowOn = cfg.enabled;
+                bool twistOn = jointId.IsElbow() && twistCfg != null && twistCfg.enabled;
+                if (elbowOn && JointKeeperGeneratedNames.ReferencesHelperBone(origBones, jointId))
+                {
+                    Debug.LogWarning($"[JointKeeper] '{smr.name}' は既に {jointId} の補助ボーンを参照しているため、この関節のボリューム補正をスキップしました（Bake 済みの可能性があります）。", smr);
+                    elbowOn = false;
+                }
+                if (twistOn && JointKeeperGeneratedNames.ReferencesTwistBone(origBones, jointId))
+                {
+                    Debug.LogWarning($"[JointKeeper] '{smr.name}' は既に {jointId} の前腕ツイストボーンを参照しているため、前腕ツイスト分散をスキップしました。", smr);
+                    twistOn = false;
+                }
+                if (!elbowOn && !twistOn)
+                    continue;
+
                 JointFrame frame = baseFrame.WithOffsets(cfg.pivotOffset, cfg.outwardAngleOffset);
 
                 // 5a. 運動学的依存分類 (ADR-05)
+                Transform[] bonesSnapshot = workingBones.ToArray();
                 var groups = TwistBoneClassifier.Classify(
                     jointId, upper, lower, child,
-                    workingBones.ToArray(), cfg, kinematicCtx,
+                    bonesSnapshot, cfg, kinematicCtx,
                     workingWeights, worldVerts, frame);
 
                 foreach (var w in groups.DiagnosticWarnings)
@@ -235,70 +258,132 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (groups.ProximalReferenceBoneIndex < 0 || groups.DistalReferenceBoneIndex < 0)
                     continue;
 
-                // 5c. 仮インデックスに対してウェイト再計算（未複製）
-                int placeholderIdx = workingBones.Count;
-                var redParams = WeightRedistributionParams.FromConfig(frame, cfg);
-                var redResult = WeightRedistributor.Redistribute(
-                    workingWeights,
-                    worldVerts,
-                    groups.ProximalBoneIndices,
-                    groups.DistalBoneIndices,
-                    groups.PrimaryHumanoidBoneIndices,
-                    placeholderIdx,
-                    in redParams);
-
-                if (redResult.Stats.AffectedVertices == 0)
+                // 5c. 肘補助ボーン: 仮インデックスに対してウェイト再計算（未複製）
+                int helperPlaceholderIdx = workingBones.Count;
+                WeightRedistributionResult redResult = null;
+                if (elbowOn)
                 {
-                    Debug.Log($"[JointKeeper] '{smr.name}' ({jointId}) スキップ: 影響頂点 0 (G_P={groups.ProximalBoneIndices.Count}, G_D={groups.DistalBoneIndices.Count})", smr);
-                    continue;
+                    var redParams = WeightRedistributionParams.FromConfig(frame, cfg);
+                    redResult = WeightRedistributor.Redistribute(
+                        workingWeights,
+                        worldVerts,
+                        groups.ProximalBoneIndices,
+                        groups.DistalBoneIndices,
+                        groups.PrimaryHumanoidBoneIndices,
+                        helperPlaceholderIdx,
+                        in redParams);
+                    if (redResult.Stats.AffectedVertices == 0)
+                    {
+                        Debug.Log($"[JointKeeper] '{smr.name}' ({jointId}) 肘補助: 影響頂点 0 (G_P={groups.ProximalBoneIndices.Count}, G_D={groups.DistalBoneIndices.Count})", smr);
+                        redResult = null;
+                    }
                 }
 
-                // 5d. 遅延生成・共有レジストリ照会 (ADR-02, ADR-03)
-                var rigKey = new RigSignatureKey(
-                    jointId,
-                    groups.ProximalSource.GetInstanceID(),
-                    groups.DistalSource.GetInstanceID(),
-                    cfg.bendFollowRatio,
-                    cfg.pushAt90Deg,
-                    cfg.pivotOffset,
-                    cfg.outwardAngleOffset);
+                // 5c'. 前腕ツイスト分散: 肘処理後のウェイトに対して計画（ボーン未生成）(FEATURE_ForearmTwist §5.1)
+                ForearmTwistPlan twistPlan = null;
+                ForearmTwistGeometry twistGeo = default;
+                if (twistOn)
+                {
+                    BoneWeight[] twistInput = redResult != null ? redResult.NewWeights : workingWeights;
+                    twistPlan = PlanForearmTwist(
+                        smr, jointId, twistCfg, groups, kinematicCtx, bonesSnapshot,
+                        twistInput, worldVerts, child, baseFrame, measuredAxes, twistSamples,
+                        workingBones.Count + (redResult != null ? 1 : 0),
+                        out twistGeo);
+                }
+                bool twistAffected = twistPlan != null && twistPlan.HasChanges;
 
-                Transform helperBone = buildState.GetOrCreateHelperBone(
-                    rigKey,
-                    frame,
-                    groups.ProximalSource,
-                    groups.DistalSource,
-                    cfg.bendFollowRatio,
-                    cfg.pushAt90Deg);
+                if (redResult == null && !twistAffected)
+                    continue;
 
-                // 5e. 近位/遠位ブレンド Bindpose 算出 (ADR-07)
-                int pRef = groups.ProximalReferenceBoneIndex;
-                int dRef = groups.DistalReferenceBoneIndex;
-                Matrix4x4 sp = workingBones[pRef].localToWorldMatrix * workingBindposes[pRef];
-                Matrix4x4 sd = workingBones[dRef].localToWorldMatrix * workingBindposes[dRef];
-                Matrix4x4 helperBindpose = SkinningEvaluator.ComputeHelperBindpose(
-                    helperBone.localToWorldMatrix, sp, sd, Mathf.Clamp(cfg.bendFollowRatio, 0.1f, 0.9f));
+                // 5d. N を先に生成し、肘補助ボーンの遠位ソースに使う (ADR-10, §8-B6)
+                Transform twistBase = twistAffected
+                    ? buildState.GetOrCreateTwistBase(jointId, twistGeo, groups.ProximalSource, groups.DistalSource)
+                    : null;
 
-                workingBones.Add(helperBone);
-                workingBindposes.Add(helperBindpose);
-                workingWeights = redResult.NewWeights;
-                anyModified = true;
-                smrAffectedVerts += redResult.Stats.AffectedVertices;
+                if (redResult != null)
+                {
+                    Transform helperDistal = (twistBase != null && twistCfg.bendOnlyElbowHelper) ? twistBase : groups.DistalSource;
+
+                    // 遅延生成・共有レジストリ照会 (ADR-02, ADR-03)
+                    var rigKey = new RigSignatureKey(
+                        jointId,
+                        groups.ProximalSource.GetInstanceID(),
+                        helperDistal.GetInstanceID(),
+                        cfg.bendFollowRatio,
+                        cfg.pushAt90Deg,
+                        cfg.pivotOffset,
+                        cfg.outwardAngleOffset);
+
+                    Transform helperBone = buildState.GetOrCreateHelperBone(
+                        rigKey,
+                        frame,
+                        groups.ProximalSource,
+                        helperDistal,
+                        cfg.bendFollowRatio,
+                        cfg.pushAt90Deg);
+
+                    // 5e. 近位/遠位ブレンド Bindpose 算出 (ADR-07)
+                    int pRef = groups.ProximalReferenceBoneIndex;
+                    int dRef = groups.DistalReferenceBoneIndex;
+                    Matrix4x4 sp = workingBones[pRef].localToWorldMatrix * workingBindposes[pRef];
+                    Matrix4x4 sd = workingBones[dRef].localToWorldMatrix * workingBindposes[dRef];
+                    Matrix4x4 helperBindpose = SkinningEvaluator.ComputeHelperBindpose(
+                        helperBone.localToWorldMatrix, sp, sd, Mathf.Clamp(cfg.bendFollowRatio, 0.1f, 0.9f));
+
+                    workingBones.Add(helperBone);
+                    workingBindposes.Add(helperBindpose);
+                    workingWeights = redResult.NewWeights;
+                    anyModified = true;
+                    smrAffectedVerts += redResult.Stats.AffectedVertices;
+                    for (int v = 0; v < combinedModified.Length; v++)
+                        combinedModified[v] |= redResult.ModifiedMask[v];
+
+                    Debug.Log(
+                        $"[JointKeeper] '{smr.name}' ({jointId}) 肘補助 適用: 影響頂点={redResult.Stats.AffectedVertices}, 最大補助ウェイト={redResult.Stats.MaxHelperWeight:F2}, Src=({groups.ProximalSource.name}, {helperDistal.name}), 補助ボーン={helperBone.name}",
+                        smr);
+                }
+
+                if (twistAffected)
+                {
+                    int rRef = twistPlan.RigidReferenceBoneIndex;
+                    Matrix4x4 sRef = workingBones[rRef].localToWorldMatrix * workingBindposes[rRef];
+                    float[] knots = twistPlan.Knots;
+                    Transform capturedBase = twistBase;
+                    Transform distalSource = groups.DistalSource;
+                    ForearmTwistGeometry geo = twistGeo;
+
+                    workingWeights = ForearmTwistProcessor.Commit(
+                        twistPlan,
+                        j =>
+                        {
+                            if (j == 0) return capturedBase;
+                            if (knots[j] >= 1f - 1e-5f) return distalSource;
+                            return buildState.GetOrCreateTwistKnot(jointId, geo, capturedBase, distalSource, knots[j]);
+                        },
+                        workingBones,
+                        workingBindposes,
+                        sRef);
+                    anyModified = true;
+                    smrAffectedVerts += twistPlan.Result.Stats.AffectedVertices;
+                    for (int v = 0; v < combinedModified.Length; v++)
+                        combinedModified[v] |= twistPlan.Result.ModifiedMask[v];
+
+                    Debug.Log(
+                        $"[JointKeeper] '{smr.name}' ({jointId}) 前腕ツイスト 適用: 影響頂点={twistPlan.Result.Stats.AffectedVertices}, ノット={knots.Length}, 4ボーン丸め={twistPlan.Result.Stats.QuantizedCount}, ロール軸={(twistGeo.RollAxisMeasured ? "実測" : "Hand 方向")}",
+                        smr);
+                }
 
                 // 5f. レスト姿勢ズレ検証
                 Vector3[] newWorldVerts = SkinningEvaluator.EvaluateWorldVerticesCpu(
                     origMesh, workingBones.ToArray(), bsWeights, workingWeights, workingBindposes.ToArray());
-                float maxDrift = SkinningEvaluator.MeasureMaxRestPoseDrift(worldVerts, newWorldVerts, redResult.ModifiedMask);
+                float maxDrift = SkinningEvaluator.MeasureMaxRestPoseDrift(worldVerts, newWorldVerts, combinedModified);
                 if (maxDrift > RestDriftWarningThresholdMeters)
                 {
                     Debug.LogWarning(
                         $"[JointKeeper] '{smr.name}' ({jointId}) でレスト姿勢ズレ {maxDrift * 1000f:F2} mm を検出しました（衣装ボーンが bind pose から大きく動かされている可能性があります）。",
                         smr);
                 }
-
-                Debug.Log(
-                    $"[JointKeeper] '{smr.name}' ({jointId}) 適用: 影響頂点={redResult.Stats.AffectedVertices}, 最大補助ウェイト={redResult.Stats.MaxHelperWeight:F2}, Src=({groups.ProximalSource.name}, {groups.DistalSource.name}), 補助ボーン={helperBone.name}, レストズレ={maxDrift * 1000f:F3} mm",
-                    smr);
             }
 
             if (!anyModified)
@@ -315,6 +400,78 @@ namespace Dennokoworks.JointKeeper.Editor
             ObjectRegistry.RegisterReplacedObject(origMesh, clonedMesh);
             context.AssetSaver.SaveAsset(clonedMesh);
             return smrAffectedVerts;
+        }
+
+        /// <summary>
+        /// 前腕ツイスト分散の診断・警告・計画 (FEATURE_ForearmTwist §1.3, §5, §8-B2, §8-B3)。適用不可なら null。
+        /// </summary>
+        private static ForearmTwistPlan PlanForearmTwist(
+            SkinnedMeshRenderer smr,
+            JointId jointId,
+            ForearmTwistConfig twistCfg,
+            JointBoneGroups groups,
+            AvatarKinematicContext kinematicCtx,
+            Transform[] smrBones,
+            BoneWeight[] inputWeights,
+            Vector3[] worldVerts,
+            Transform child,
+            JointFrame baseFrame,
+            Dictionary<JointId, Vector3> measuredAxes,
+            Dictionary<JointId, TwistAxisSample> twistSamples,
+            int placeholderBase,
+            out ForearmTwistGeometry geometry)
+        {
+            geometry = default;
+            if (groups.DistalRigidBoneIndices.Count == 0)
+            {
+                Debug.Log($"[JointKeeper] '{smr.name}' ({jointId}) 前腕ツイスト スキップ: 剛体遠位ボーンへのウェイトがありません。", smr);
+                return null;
+            }
+
+            var diag = ForearmTwistProcessor.Analyze(inputWeights, smrBones, groups, kinematicCtx, null);
+            if (diag.HasExistingTwistRig && !twistCfg.applyEvenIfExistingTwistRig)
+            {
+                Debug.LogWarning(
+                    $"[JointKeeper] '{smr.name}' ({jointId}) は既存の前腕ツイストボーン '{diag.ExistingRigBoneName}' にウェイトが乗っているため、前腕ツイスト分散をスキップしました（{diag.ExistingRigVertexCount} 頂点）。強制適用する場合は詳細設定の「既存ツイストリグがあっても適用」を有効にしてください。",
+                    smr);
+                return null;
+            }
+            if (diag.RigidVertexCount == 0)
+                return null;
+            if (diag.ForearmPhysBoneVertexCount > 0)
+            {
+                Debug.LogWarning(
+                    $"[JointKeeper] '{smr.name}' ({jointId}) の前腕にある PhysBone ({string.Join(", ", diag.ForearmPhysBoneNames)}) は元のロールで動き続けるため、まわりの袖とずれる場合があります（{diag.ForearmPhysBoneVertexCount} 頂点）。",
+                    smr);
+            }
+            if (diag.HandWeightVertexCount > 0 && twistCfg.twistFollow < 1f - 1e-4f)
+            {
+                Debug.LogWarning(
+                    $"[JointKeeper] '{smr.name}' ({jointId}) は手首から先にもウェイトがある（{diag.HandWeightVertexCount} 頂点）ため、ひねり追従率 {twistCfg.twistFollow:F2} では手首にねじれの段差が出ます。手袋・素体などではひねり追従率 1.0 を推奨します。",
+                    smr);
+            }
+
+            Vector3? measuredRoll = null;
+            if (twistSamples != null && twistSamples.TryGetValue(jointId, out var sample) && sample.HasAxis)
+                measuredRoll = sample.Axis;
+            Vector3 hinge = (measuredAxes != null && measuredAxes.TryGetValue(jointId, out var h)) ? h : baseFrame.HingeAxis;
+
+            if (!ForearmTwistGeometry.TryCompute(groups.DistalSource, child, measuredRoll, hinge, baseFrame.LimbLength, out geometry, out string error))
+            {
+                Debug.LogWarning($"[JointKeeper] '{smr.name}' ({jointId}) 前腕ツイスト スキップ: {error}", smr);
+                return null;
+            }
+
+            var lookup = new Dictionary<Transform, int>();
+            for (int i = 0; i < smrBones.Length; i++)
+            {
+                if (smrBones[i] != null && !lookup.ContainsKey(smrBones[i]))
+                    lookup[smrBones[i]] = i;
+            }
+
+            return ForearmTwistProcessor.Plan(
+                inputWeights, worldVerts, groups, twistCfg, geometry, placeholderBase,
+                t => (t != null && lookup.TryGetValue(t, out int idx)) ? idx : -1);
         }
 
         private static Dictionary<(SkinnedMeshRenderer smr, JointId jointId), OwnedAssignment> ResolveOwnership(
@@ -337,13 +494,15 @@ namespace Dennokoworks.JointKeeper.Editor
                     foreach (var jointId in AllJoints)
                     {
                         JointConfig resolved = comp.ResolveConfig(jointId);
-                        if (!resolved.enabled) continue;
+                        ForearmTwistConfig twist = comp.ResolveTwistConfig(jointId);
+                        if (!resolved.enabled && !(jointId.IsElbow() && twist.enabled)) continue;
 
                         var key = (smr, jointId);
                         var candidate = new OwnedAssignment
                         {
                             Component = comp,
                             Config = resolved,
+                            TwistConfig = twist,
                             IsManual = isManual,
                             HierarchyDepth = depth,
                             ScanOrder = cIdx,

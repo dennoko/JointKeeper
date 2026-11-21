@@ -27,6 +27,19 @@ namespace Dennokoworks.JointKeeper.Editor
             public float Weight1;
         }
 
+        private sealed class ShadowTwistBase
+        {
+            public Transform BaseShadow;
+            public Transform ProximalShadow;
+            public Transform DistalShadow;
+            public Vector3 AimTargetInDistalLocal;
+            public Vector3 AimAxisLocal;
+            public Vector3 UpAxisLocal;
+            public Vector3 WorldUpInProximalLocal;
+            public readonly List<(Transform knot, float k)> Knots = new List<(Transform, float)>();
+            public readonly Dictionary<int, Transform> KnotsByQuantizedK = new Dictionary<int, Transform>();
+        }
+
         private sealed class JointBendInfo
         {
             public JointId JointId;
@@ -48,6 +61,10 @@ namespace Dennokoworks.JointKeeper.Editor
         private readonly Dictionary<RigSignatureKey, ShadowHelperEntry> _helpersByKey =
             new Dictionary<RigSignatureKey, ShadowHelperEntry>();
         private readonly List<JointBendInfo> _bendInfos = new List<JointBendInfo>();
+        private readonly Dictionary<(JointId, int, int), ShadowTwistBase> _twistBases =
+            new Dictionary<(JointId, int, int), ShadowTwistBase>();
+        private readonly Dictionary<Transform, ShadowTwistBase> _twistBaseByShadow =
+            new Dictionary<Transform, ShadowTwistBase>();
         private readonly List<OutfitFollowerEntry> _outfitFollowers = new List<OutfitFollowerEntry>();
 
         public JointKeeperPreviewPose(
@@ -131,13 +148,15 @@ namespace Dennokoworks.JointKeeper.Editor
             Transform proximalSourceOrig,
             Transform distalSourceOrig,
             float bendFollowRatio,
-            float pushAt90Deg)
+            float pushAt90Deg,
+            Transform distalShadowOverride = null)
         {
             if (_helpersByKey.TryGetValue(key, out var existing))
                 return existing.HelperShadow;
 
             Transform proxShadow = ResolveConstraintShadowBone(proximalSourceOrig);
-            Transform distShadow = ResolveConstraintShadowBone(distalSourceOrig);
+            // distalShadowOverride（影の N）はレスト回転が distalSourceOrig と同一なので、オフセットは元ボーン基準で算出してよい
+            Transform distShadow = distalShadowOverride != null ? distalShadowOverride : ResolveConstraintShadowBone(distalSourceOrig);
             if (proxShadow == null || distShadow == null)
                 return null;
 
@@ -194,8 +213,87 @@ namespace Dennokoworks.JointKeeper.Editor
         }
 
         /// <summary>
+        /// 影の曲げ専用基準ボーン N を取得または生成する (FEATURE_ForearmTwist §4.2)。
+        /// </summary>
+        public Transform GetOrCreateShadowTwistBase(
+            JointId jointId,
+            in ForearmTwistGeometry geo,
+            Transform proximalSourceOrig,
+            Transform distalSourceOrig)
+        {
+            if (proximalSourceOrig == null || distalSourceOrig == null) return null;
+            var key = (jointId, proximalSourceOrig.GetInstanceID(), distalSourceOrig.GetInstanceID());
+            if (_twistBases.TryGetValue(key, out var existing))
+                return existing.BaseShadow;
+
+            Transform proxShadow = ResolveConstraintShadowBone(proximalSourceOrig);
+            Transform distShadow = ResolveConstraintShadowBone(distalSourceOrig);
+            if (proxShadow == null || distShadow == null) return null;
+
+            var go = new GameObject($"JK_ShadowTwistBase_{jointId}")
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            Transform baseShadow = go.transform;
+            baseShadow.SetParent(distShadow, worldPositionStays: false);
+            baseShadow.localPosition = Vector3.zero;
+            baseShadow.localRotation = Quaternion.identity;
+            baseShadow.localScale = Vector3.one;
+
+            ForearmTwistRigBuilder.ComputeAimAxes(geo, proximalSourceOrig, distalSourceOrig,
+                out Vector3 aimAxisLocal, out Vector3 upAxisLocal, out Vector3 worldUpLocal);
+
+            var entry = new ShadowTwistBase
+            {
+                BaseShadow = baseShadow,
+                ProximalShadow = proxShadow,
+                DistalShadow = distShadow,
+                AimTargetInDistalLocal = distalSourceOrig.InverseTransformPoint(geo.ElbowCenter + geo.RollAxis * geo.ForearmLength),
+                AimAxisLocal = aimAxisLocal,
+                UpAxisLocal = upAxisLocal,
+                WorldUpInProximalLocal = worldUpLocal,
+            };
+            _twistBases[key] = entry;
+            _twistBaseByShadow[baseShadow] = entry;
+            return baseShadow;
+        }
+
+        /// <summary>
+        /// 影の中間ボーン T_j（N と DistalSource の回転を k でブレンド）を取得または生成する (§4.3)。
+        /// </summary>
+        public Transform GetOrCreateShadowTwistKnot(Transform shadowTwistBase, float k, in ForearmTwistGeometry geo)
+        {
+            if (shadowTwistBase == null || !_twistBaseByShadow.TryGetValue(shadowTwistBase, out var entry))
+                return null;
+
+            int qk = Mathf.RoundToInt(Mathf.Clamp01(k) * 10000f);
+            if (entry.KnotsByQuantizedK.TryGetValue(qk, out var existing))
+                return existing;
+
+            var go = new GameObject($"JK_ShadowTwist_{qk}")
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            Transform knot = go.transform;
+            knot.SetParent(shadowTwistBase, worldPositionStays: false);
+            knot.position = geo.ElbowCenter + geo.RollAxis * (Mathf.Clamp01(k) * geo.ForearmLength);
+            knot.localRotation = Quaternion.identity;
+            knot.localScale = Vector3.one;
+
+            entry.Knots.Add((knot, Mathf.Clamp01(k)));
+            entry.KnotsByQuantizedK[qk] = knot;
+            return knot;
+        }
+
+        /// <summary>
         /// Constraint ソース用の影ボーンを返す（ScaleProxy ではなく本体ボーンの影を返す）。
         /// </summary>
+        /// <summary>前腕ツイストのノット（DistalSource 自身）など、Constraint ソース側の影ボーンを外部から取得する。</summary>
+        public Transform GetConstraintShadowBone(Transform origBone)
+        {
+            return ResolveConstraintShadowBone(origBone);
+        }
+
         private Transform ResolveConstraintShadowBone(Transform origBone)
         {
             if (origBone == null) return null;
@@ -321,7 +419,30 @@ namespace Dennokoworks.JointKeeper.Editor
                 }
             }
 
-            // 3. 影補助ボーンを VRCParentConstraint と同一の RigMath 式で更新
+            // 3. 影の前腕ツイストボーン（N: Aim、T_j: 回転ブレンド）を VRC Constraint と同一の RigMath 式で更新
+            //    肘補助ボーンが N をソースにするため、補助ボーンより先に評価する
+            foreach (var kv in _twistBases)
+            {
+                var e = kv.Value;
+                if (e.BaseShadow == null || e.DistalShadow == null || e.ProximalShadow == null) continue;
+
+                Vector3 pos = e.DistalShadow.position;
+                Vector3 target = e.DistalShadow.TransformPoint(e.AimTargetInDistalLocal);
+                Vector3 worldUp = e.ProximalShadow.TransformDirection(e.WorldUpInProximalLocal);
+                if (RigMath.EvaluateAimConstraint(pos, target, e.AimAxisLocal, e.UpAxisLocal, worldUp, out Quaternion aimRot))
+                    e.BaseShadow.rotation = aimRot;
+
+                Quaternion baseRot = e.BaseShadow.rotation;
+                Quaternion distRot = e.DistalShadow.rotation;
+                for (int k = 0; k < e.Knots.Count; k++)
+                {
+                    var (knot, kw) = e.Knots[k];
+                    if (knot != null)
+                        knot.rotation = RigMath.EvaluateTwistKnotRotation(baseRot, distRot, kw);
+                }
+            }
+
+            // 4. 影補助ボーンを VRCParentConstraint と同一の RigMath 式で更新
             foreach (var kv in _helpersByKey)
             {
                 var e = kv.Value;
@@ -430,6 +551,8 @@ namespace Dennokoworks.JointKeeper.Editor
             _syncPairs.Clear();
             _helpersByKey.Clear();
             _bendInfos.Clear();
+            _twistBases.Clear();
+            _twistBaseByShadow.Clear();
             _outfitFollowers.Clear();
         }
     }

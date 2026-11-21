@@ -29,6 +29,12 @@ namespace Dennokoworks.JointKeeper.Editor
         private SerializedProperty _unlinkKnee;
         private SerializedProperty _leftKnee;
         private SerializedProperty _rightKnee;
+        private SerializedProperty _leftTwist;
+        private SerializedProperty _rightTwist;
+
+        /// <summary>前腕ツイスト診断のキャッシュ（メッシュ全頂点を走査するため Inspector 表示ごとには再計算しない）。</summary>
+        private readonly Dictionary<(int smrId, int meshId, JointId jointId), ForearmTwistSmrDiagnostics> _twistDiagCache =
+            new Dictionary<(int, int, JointId), ForearmTwistSmrDiagnostics>();
 
         private DennokoVersionChecker.Result _versionResult;
         private static GUIStyle _versionLinkStyle;
@@ -44,6 +50,9 @@ namespace Dennokoworks.JointKeeper.Editor
             _unlinkKnee = serializedObject.FindProperty("unlinkKneeLeftRight");
             _leftKnee = serializedObject.FindProperty("leftKnee");
             _rightKnee = serializedObject.FindProperty("rightKnee");
+            _leftTwist = serializedObject.FindProperty("leftForearmTwist");
+            _rightTwist = serializedObject.FindProperty("rightForearmTwist");
+            _twistDiagCache.Clear();
 
             JointKeeperLocalization.OnLanguageChanged += OnLanguageChanged;
 
@@ -94,6 +103,8 @@ namespace Dennokoworks.JointKeeper.Editor
             DrawSimpleJointControls(
                 "joint.elbows", "joint.elbows_tooltip",
                 _leftElbow, _rightElbow, _unlinkElbow);
+            EditorGUILayout.Space(2f);
+            DrawSimpleTwistControls(comp, avatarAnimator, avatarRoot);
             EditorGUILayout.Space(2f);
             DrawSimpleJointControls(
                 "joint.knees", "joint.knees_tooltip",
@@ -423,6 +434,11 @@ namespace Dennokoworks.JointKeeper.Editor
                 JointKeeperLocalization.Tr("bake.section_desc"),
                 EditorStyles.wordWrappedMiniLabel);
 
+            if (comp.ResolveTwistConfig(JointId.LeftElbow).enabled || comp.ResolveTwistConfig(JointId.RightElbow).enabled)
+            {
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("bake.twist_not_supported_box"), MessageType.Warning);
+            }
+
             if (GUILayout.Button(JointKeeperLocalization.Content("bake.btn_bake", "bake.btn_bake_tooltip")))
             {
                 serializedObject.ApplyModifiedProperties();
@@ -596,7 +612,12 @@ namespace Dennokoworks.JointKeeper.Editor
                 {
                     serializedObject.ApplyModifiedProperties();
                     Undo.RecordObject(comp, "Unlink JointKeeper Left/Right");
-                    if (isElbow) comp.rightElbow.CopyMirroredNumericsFrom(comp.leftElbow);
+                    if (isElbow)
+                    {
+                        comp.rightElbow.CopyMirroredNumericsFrom(comp.leftElbow);
+                        if (comp.rightForearmTwist == null) comp.rightForearmTwist = new ForearmTwistConfig();
+                        comp.rightForearmTwist.CopyNumericsFrom(comp.leftForearmTwist);
+                    }
                     else comp.rightKnee.CopyMirroredNumericsFrom(comp.leftKnee);
                     EditorUtility.SetDirty(comp);
                     serializedObject.Update();
@@ -612,6 +633,22 @@ namespace Dennokoworks.JointKeeper.Editor
                 DrawDetailedJointFields(leftProp, JointKeeperLocalization.Tr("joint.left"));
                 EditorGUILayout.Space(2f);
                 DrawDetailedJointFields(rightProp, JointKeeperLocalization.Tr("joint.right"));
+            }
+
+            if (isElbow)
+            {
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField(JointKeeperLocalization.Tr("twist.advanced_header"), EditorStyles.boldLabel);
+                if (!unlinkProp.boolValue)
+                {
+                    DrawDetailedTwistFields(_leftTwist, JointKeeperLocalization.Tr("advanced.lr_shared_header"));
+                }
+                else
+                {
+                    DrawDetailedTwistFields(_leftTwist, JointKeeperLocalization.Tr("joint.left"));
+                    EditorGUILayout.Space(2f);
+                    DrawDetailedTwistFields(_rightTwist, JointKeeperLocalization.Tr("joint.right"));
+                }
             }
             EditorGUI.indentLevel--;
         }
@@ -727,11 +764,16 @@ namespace Dennokoworks.JointKeeper.Editor
                 JointKeeperLocalization.Format("diag.sample_header", sampleSmr.name),
                 EditorStyles.miniBoldLabel);
 
+            var twistSamples = JointKeeperPreviewState.GetCachedTwistSamples(avatarRoot.gameObject);
             var joints = new[] { JointId.LeftElbow, JointId.RightElbow, JointId.LeftKnee, JointId.RightKnee };
             foreach (var jointId in joints)
             {
                 JointConfig cfg = comp.ResolveConfig(jointId);
-                if (!cfg.enabled) continue;
+                bool twistEnabled = jointId.IsElbow() && comp.ResolveTwistConfig(jointId).enabled;
+                if (!cfg.enabled && !twistEnabled) continue;
+
+                if (twistEnabled)
+                    DrawTwistAxisDiagnostics(jointId, twistSamples);
 
                 Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
                 Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
@@ -755,6 +797,232 @@ namespace Dennokoworks.JointKeeper.Editor
                 foreach (var warn in groups.DiagnosticWarnings)
                     EditorGUILayout.HelpBox(warn, MessageType.Warning);
             }
+        }
+
+        /// <summary>
+        /// 通常表示の前腕ツイスト分散コントロール（トグル＋ひねり追従率）と推奨・警告表示 (FEATURE_ForearmTwist §1.3, §6.2)。
+        /// </summary>
+        private void DrawSimpleTwistControls(JointKeeperComponent comp, Animator avatarAnimator, Transform avatarRoot)
+        {
+            if (_leftTwist == null || _rightTwist == null) return;
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            var leftEnabled = _leftTwist.FindPropertyRelative("enabled");
+            var rightEnabled = _rightTwist.FindPropertyRelative("enabled");
+            bool isUnlinked = _unlinkElbow.boolValue;
+            bool anyEnabled;
+
+            if (!isUnlinked)
+            {
+                leftEnabled.boolValue = EditorGUILayout.ToggleLeft(
+                    JointKeeperLocalization.Content("twist.title", "twist.title_tooltip"),
+                    leftEnabled.boolValue,
+                    EditorStyles.boldLabel);
+                anyEnabled = leftEnabled.boolValue;
+                if (leftEnabled.boolValue)
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.Slider(
+                        _leftTwist.FindPropertyRelative("twistFollow"), 0f, 1f,
+                        JointKeeperLocalization.Content("twist.follow", "twist.follow_tooltip"));
+                    EditorGUI.indentLevel--;
+                }
+            }
+            else
+            {
+                EditorGUILayout.LabelField(
+                    new GUIContent(
+                        JointKeeperLocalization.Format("joint.unlinked_suffix", JointKeeperLocalization.Tr("twist.title")),
+                        JointKeeperLocalization.Tr("twist.title_tooltip")),
+                    EditorStyles.boldLabel);
+                EditorGUI.indentLevel++;
+
+                leftEnabled.boolValue = EditorGUILayout.ToggleLeft(
+                    JointKeeperLocalization.Content("joint.left", "joint.left_tooltip"),
+                    leftEnabled.boolValue);
+                if (leftEnabled.boolValue)
+                {
+                    EditorGUILayout.Slider(
+                        _leftTwist.FindPropertyRelative("twistFollow"), 0f, 1f,
+                        JointKeeperLocalization.Content("twist.left_follow", "twist.follow_tooltip"));
+                }
+
+                rightEnabled.boolValue = EditorGUILayout.ToggleLeft(
+                    JointKeeperLocalization.Content("joint.right", "joint.right_tooltip"),
+                    rightEnabled.boolValue);
+                if (rightEnabled.boolValue)
+                {
+                    EditorGUILayout.Slider(
+                        _rightTwist.FindPropertyRelative("twistFollow"), 0f, 1f,
+                        JointKeeperLocalization.Content("twist.right_follow", "twist.follow_tooltip"));
+                }
+                anyEnabled = leftEnabled.boolValue || rightEnabled.boolValue;
+
+                EditorGUI.indentLevel--;
+            }
+
+            if (anyEnabled)
+            {
+                EditorGUILayout.LabelField(JointKeeperLocalization.Tr("twist.recommend_note"), EditorStyles.wordWrappedMiniLabel);
+                serializedObject.ApplyModifiedProperties();
+                DrawTwistWarnings(comp, avatarAnimator, avatarRoot);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// 対象メッシュごとの前腕ツイスト診断（Hand ウェイト・既存ツイストリグ・前腕 PhysBone）を警告表示する。
+        /// </summary>
+        private void DrawTwistWarnings(JointKeeperComponent comp, Animator avatarAnimator, Transform avatarRoot)
+        {
+            if (avatarAnimator == null || avatarRoot == null || comp.IsBaked) return;
+
+            var handMeshes = new List<string>();
+            var rigMeshes = new List<string>();
+            var rigBones = new HashSet<string>();
+            var pbMeshes = new List<string>();
+            var pbBones = new HashSet<string>();
+
+            Dictionary<HumanBodyBones, Transform> humanoidBones = null;
+            AvatarKinematicContext ctx = null;
+            Dictionary<Transform, Transform> aliasMap = null;
+
+            var targets = JointKeeperTargetCollector.CollectTargets(comp, avatarRoot);
+            foreach (var jointId in new[] { JointId.LeftElbow, JointId.RightElbow })
+            {
+                var twistCfg = comp.ResolveTwistConfig(jointId);
+                if (!twistCfg.enabled) continue;
+                JointConfig cfg = comp.ResolveConfig(jointId);
+
+                foreach (var smr in targets)
+                {
+                    if (smr == null || smr.sharedMesh == null || smr.bones == null || smr.bones.Length == 0) continue;
+                    var key = (smr.GetInstanceID(), smr.sharedMesh.GetInstanceID(), jointId);
+                    if (!_twistDiagCache.TryGetValue(key, out var diag))
+                    {
+                        if (humanoidBones == null)
+                        {
+                            humanoidBones = HumanoidBoneResolver.ResolveAll(avatarAnimator, out _);
+                            ctx = AvatarKinematicContext.Build(avatarRoot.gameObject, avatarAnimator, humanoidBones);
+                            aliasMap = PreviewBoneResolver.BuildAliasMap(avatarRoot.gameObject);
+                        }
+                        diag = AnalyzeTwistForRenderer(smr, jointId, cfg, humanoidBones, ctx, aliasMap);
+                        _twistDiagCache[key] = diag;
+                    }
+                    if (diag == null) continue;
+
+                    if (diag.HandWeightVertexCount > 0 && twistCfg.twistFollow < 1f - 1e-4f && !handMeshes.Contains(smr.name))
+                        handMeshes.Add(smr.name);
+                    if (diag.HasExistingTwistRig && !twistCfg.applyEvenIfExistingTwistRig && !rigMeshes.Contains(smr.name))
+                    {
+                        rigMeshes.Add(smr.name);
+                        if (diag.ExistingRigBoneName != null) rigBones.Add(diag.ExistingRigBoneName);
+                    }
+                    if (diag.ForearmPhysBoneVertexCount > 0 && !pbMeshes.Contains(smr.name))
+                    {
+                        pbMeshes.Add(smr.name);
+                        foreach (var n in diag.ForearmPhysBoneNames) pbBones.Add(n);
+                    }
+                }
+            }
+
+            if (handMeshes.Count > 0)
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Format("twist.warn_hand_weights", string.Join(", ", handMeshes)), MessageType.Warning);
+            if (rigMeshes.Count > 0)
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Format("twist.warn_existing_rig", string.Join(", ", rigMeshes), string.Join(", ", rigBones)), MessageType.Warning);
+            if (pbMeshes.Count > 0)
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Format("twist.warn_physbone", string.Join(", ", pbMeshes), string.Join(", ", pbBones)), MessageType.Info);
+        }
+
+        private static ForearmTwistSmrDiagnostics AnalyzeTwistForRenderer(
+            SkinnedMeshRenderer smr,
+            JointId jointId,
+            JointConfig cfg,
+            Dictionary<HumanBodyBones, Transform> humanoidBones,
+            AvatarKinematicContext ctx,
+            Dictionary<Transform, Transform> aliasMap)
+        {
+            Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
+            Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
+            Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
+            if (upper == null || lower == null) return null;
+
+            var groups = TwistBoneClassifier.Classify(
+                jointId, upper, lower, child, smr.bones, cfg, ctx, boneAliasMap: aliasMap);
+            if (groups.DistalBoneIndices.Count == 0) return null;
+
+            BoneWeight[] weights = smr.sharedMesh.boneWeights;
+            return ForearmTwistProcessor.Analyze(
+                weights, smr.bones, groups, ctx,
+                t => (t != null && aliasMap != null && aliasMap.TryGetValue(t, out var m)) ? m : t);
+        }
+
+        private static void DrawDetailedTwistFields(SerializedProperty prop, string header)
+        {
+            if (prop == null) return;
+            EditorGUILayout.LabelField(header, EditorStyles.miniBoldLabel);
+
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("enabled"),
+                JointKeeperLocalization.Content("twist.title", "twist.title_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("twistFollow"), 0f, 1f,
+                JointKeeperLocalization.Content("twist.follow", "twist.follow_tooltip"));
+            EditorGUILayout.IntSlider(
+                prop.FindPropertyRelative("segments"), 1, 4,
+                JointKeeperLocalization.Content("twist.segments", "twist.segments_tooltip"));
+
+            var startProp = prop.FindPropertyRelative("startRatio");
+            var endProp = prop.FindPropertyRelative("endRatio");
+            EditorGUILayout.Slider(startProp, -0.3f, 0.5f,
+                JointKeeperLocalization.Content("twist.start_ratio", "twist.start_ratio_tooltip"));
+            EditorGUILayout.Slider(endProp, 0.3f, 1.2f,
+                JointKeeperLocalization.Content("twist.end_ratio", "twist.end_ratio_tooltip"));
+            if (endProp.floatValue < startProp.floatValue + ForearmTwistConfig.MinRatioSpan)
+                endProp.floatValue = startProp.floatValue + ForearmTwistConfig.MinRatioSpan;
+
+            var curveProp = prop.FindPropertyRelative("curve");
+            EditorGUILayout.PropertyField(curveProp,
+                JointKeeperLocalization.Content("twist.curve", "twist.curve_tooltip"));
+            if ((TwistCurve)curveProp.enumValueIndex == TwistCurve.Power)
+            {
+                EditorGUILayout.Slider(
+                    prop.FindPropertyRelative("curvePower"), 1f, 3f,
+                    JointKeeperLocalization.Content("twist.curve_power", "twist.curve_power_tooltip"));
+            }
+
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("bendOnlyElbowHelper"),
+                JointKeeperLocalization.Content("twist.bend_only_helper", "twist.bend_only_helper_tooltip"));
+            EditorGUILayout.PropertyField(
+                prop.FindPropertyRelative("applyEvenIfExistingTwistRig"),
+                JointKeeperLocalization.Content("twist.apply_existing", "twist.apply_existing_tooltip"));
+            EditorGUILayout.Slider(
+                prop.FindPropertyRelative("twistSnapThreshold"), 0f, 0.5f,
+                JointKeeperLocalization.Content("twist.snap", "twist.snap_tooltip"));
+        }
+
+        private static void DrawTwistAxisDiagnostics(JointId jointId, Dictionary<JointId, TwistAxisSample> twistSamples)
+        {
+            bool has = twistSamples != null && twistSamples.TryGetValue(jointId, out var sample);
+            TwistAxisSample s = has ? twistSamples[jointId] : default;
+
+            string axis = has && s.HasAxis
+                ? JointKeeperLocalization.Tr("twist.diag_axis_measured")
+                : JointKeeperLocalization.Tr("twist.diag_axis_fallback");
+            string roll = has
+                ? JointKeeperLocalization.Format("twist.diag_roll_value", s.DegreesPerMuscleUnit)
+                : JointKeeperLocalization.Tr("twist.diag_roll_none");
+            string lat = has && s.LowerArmTwistSetting >= 0f ? s.LowerArmTwistSetting.ToString("F2") : "-";
+
+            EditorGUILayout.LabelField(
+                JointKeeperLocalization.Format("twist.diag_line", jointId, axis, roll, lat),
+                EditorStyles.wordWrappedMiniLabel);
+
+            if (has && s.DegreesPerMuscleUnit < 1f)
+                EditorGUILayout.HelpBox(JointKeeperLocalization.Tr("twist.diag_roll_zero_warn"), MessageType.Warning);
         }
 
         private static Animator FindAvatarAnimator(Transform t)

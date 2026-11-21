@@ -22,8 +22,8 @@ namespace Dennokoworks.JointKeeper.Editor
             int variantIndex)
         {
             string baseName = variantIndex <= 1
-                ? $"JK_Helper_{jointId}"
-                : $"JK_Helper_{jointId}_{variantIndex}";
+                ? JointKeeperGeneratedNames.HelperBaseName(jointId)
+                : $"{JointKeeperGeneratedNames.HelperBaseName(jointId)}_{variantIndex}";
             string uniqueName = MakeUniqueChildName(proximalSource, baseName);
 
             var helperGo = new GameObject(uniqueName);
@@ -101,7 +101,7 @@ namespace Dennokoworks.JointKeeper.Editor
             return helper;
         }
 
-        private static string MakeUniqueChildName(Transform parent, string desiredName)
+        internal static string MakeUniqueChildName(Transform parent, string desiredName)
         {
             if (parent == null || parent.Find(desiredName) == null)
                 return desiredName;

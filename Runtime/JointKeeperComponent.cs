@@ -22,6 +22,10 @@ namespace Dennokoworks.JointKeeper
         public JointConfig leftElbow = JointConfig.CreateElbowDefault();
         public JointConfig rightElbow = JointConfig.CreateElbowDefault();
 
+        /// <summary>前腕ツイスト分散（肘専用）。左右リンクは unlinkElbowLeftRight に従う。</summary>
+        public ForearmTwistConfig leftForearmTwist = new ForearmTwistConfig();
+        public ForearmTwistConfig rightForearmTwist = new ForearmTwistConfig();
+
         public bool unlinkKneeLeftRight = false;
         public JointConfig leftKnee = JointConfig.CreateKneeDefault();
         public JointConfig rightKnee = JointConfig.CreateKneeDefault();
@@ -67,6 +71,29 @@ namespace Dennokoworks.JointKeeper
 
                 default:
                     return new JointConfig();
+            }
+        }
+
+        /// <summary>
+        /// 左右リンク設定を考慮した解決済み ForearmTwistConfig を返す（肘以外は常に無効）。
+        /// 全項目がスカラーで左右対称なため、リンク時は符号反転なしで left の値をそのまま使う。
+        /// </summary>
+        public ForearmTwistConfig ResolveTwistConfig(JointId jointId)
+        {
+            switch (jointId)
+            {
+                case JointId.LeftElbow:
+                    return (leftForearmTwist ?? new ForearmTwistConfig()).Clone();
+
+                case JointId.RightElbow:
+                {
+                    if (!unlinkElbowLeftRight && leftForearmTwist != null)
+                        return leftForearmTwist.Clone();
+                    return (rightForearmTwist ?? new ForearmTwistConfig()).Clone();
+                }
+
+                default:
+                    return new ForearmTwistConfig { enabled = false };
             }
         }
     }

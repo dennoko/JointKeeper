@@ -77,6 +77,19 @@ namespace Dennokoworks.JointKeeper
             }
         }
 
+        /// <summary>遠位ボーンのロール（ひねり）マッスル名 (FEATURE_ForearmTwist §4.6)。</summary>
+        public static string GetTwistMuscleName(this JointId id)
+        {
+            switch (id)
+            {
+                case JointId.LeftElbow: return "Left Forearm Twist In-Out";
+                case JointId.RightElbow: return "Right Forearm Twist In-Out";
+                case JointId.LeftKnee: return "Left Lower Leg Twist In-Out";
+                case JointId.RightKnee: return "Right Lower Leg Twist In-Out";
+                default: return string.Empty;
+            }
+        }
+
         public static string GetMuscleName(this JointId id)
         {
             switch (id)

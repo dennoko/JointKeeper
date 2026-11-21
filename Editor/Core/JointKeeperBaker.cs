@@ -205,6 +205,13 @@ namespace Dennokoworks.JointKeeper.Editor
                         avatarForward, avatarUp, measured);
                     JointFrame frame = baseFrame.WithOffsets(cfg.pivotOffset, cfg.outwardAngleOffset);
 
+                    // 関節 × 機能単位の二重適用防止 (FEATURE_ForearmTwist §1.5)
+                    if (JointKeeperGeneratedNames.ReferencesHelperBone(origBones, jointId))
+                    {
+                        Debug.LogWarning($"[JointKeeper] Bake '{smr.name}' は既に {jointId} の補助ボーンを参照しているため、この関節をスキップしました。", smr);
+                        continue;
+                    }
+
                     var groups = TwistBoneClassifier.Classify(
                         jointId, targetUpper, targetLower, targetChild,
                         workingBones.ToArray(), cfg, kinematicCtx,
@@ -369,6 +376,11 @@ namespace Dennokoworks.JointKeeper.Editor
             if (detectedAnyScaleAdjuster)
             {
                 summary += JointKeeperLocalization.Tr("bake.msg_scale_adjuster_note");
+            }
+            if (comp.ResolveTwistConfig(JointId.LeftElbow).enabled || comp.ResolveTwistConfig(JointId.RightElbow).enabled)
+            {
+                // 前腕ツイスト分散は初期実装では NDMF ビルド（非破壊）専用 (FEATURE_ForearmTwist §1.4)
+                summary += JointKeeperLocalization.Tr("bake.msg_twist_not_supported");
             }
             Debug.Log($"[JointKeeper] {summary}", comp);
 

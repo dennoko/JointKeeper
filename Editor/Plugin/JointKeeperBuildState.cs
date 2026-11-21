@@ -7,6 +7,7 @@ namespace Dennokoworks.JointKeeper.Editor
     /// <summary>
     /// ビルド 1 回分の補助ボーン共有レジストリ (ADR-02, ADR-03)。
     /// RigSignatureKey が一致すれば同一補助ボーンを再利用し、異なる場合のみ追加生成する。
+    /// 前腕ツイスト分散ボーンも同様に共有し、素体と衣装で同じ N・T_j を使う (FEATURE_ForearmTwist §1.5)。
     /// </summary>
     internal sealed class JointKeeperBuildState
     {
@@ -15,7 +16,14 @@ namespace Dennokoworks.JointKeeper.Editor
         private readonly Dictionary<JointId, int> _variantCounts =
             new Dictionary<JointId, int>();
 
+        private readonly Dictionary<(JointId jointId, int proximalId, int distalId), Transform> _twistBases =
+            new Dictionary<(JointId, int, int), Transform>();
+        private readonly Dictionary<(int baseId, int quantizedK), Transform> _twistKnots =
+            new Dictionary<(int, int), Transform>();
+        private readonly Dictionary<int, int> _twistKnotCounts = new Dictionary<int, int>();
+
         public int CreatedBoneCount => _helpersByKey.Count;
+        public int CreatedTwistBoneCount => _twistBases.Count + _twistKnots.Count;
 
         public Transform GetOrCreateHelperBone(
             RigSignatureKey key,
@@ -41,6 +49,49 @@ namespace Dennokoworks.JointKeeper.Editor
                 variant);
 
             _helpersByKey[key] = created;
+            return created;
+        }
+
+        /// <summary>
+        /// 曲げ専用基準ボーン N を取得または生成する。N はボーンだけで決まるため、設定に関係なく同じ腕なら共有する。
+        /// </summary>
+        public Transform GetOrCreateTwistBase(
+            JointId jointId,
+            in ForearmTwistGeometry geometry,
+            Transform proximalSource,
+            Transform distalSource)
+        {
+            var key = (jointId, proximalSource.GetInstanceID(), distalSource.GetInstanceID());
+            if (_twistBases.TryGetValue(key, out Transform existing) && existing != null)
+                return existing;
+
+            Transform created = ForearmTwistRigBuilder.CreateTwistBase(
+                jointId, geometry, proximalSource, distalSource, out _);
+            _twistBases[key] = created;
+            return created;
+        }
+
+        /// <summary>
+        /// 中間ボーン T_j（ロール追従率 k）を取得または生成する。k が一致すれば衣装・素体で共有する。
+        /// </summary>
+        public Transform GetOrCreateTwistKnot(
+            JointId jointId,
+            in ForearmTwistGeometry geometry,
+            Transform twistBase,
+            Transform distalSource,
+            float k)
+        {
+            int baseId = twistBase.GetInstanceID();
+            var key = (baseId, Mathf.RoundToInt(Mathf.Clamp01(k) * 10000f));
+            if (_twistKnots.TryGetValue(key, out Transform existing) && existing != null)
+                return existing;
+
+            int index = _twistKnotCounts.TryGetValue(baseId, out int c) ? c + 1 : 1;
+            _twistKnotCounts[baseId] = index;
+
+            Transform created = ForearmTwistRigBuilder.CreateTwistKnot(
+                jointId, index, geometry, twistBase, distalSource, k, displayAxialRatio: k);
+            _twistKnots[key] = created;
             return created;
         }
     }

@@ -40,6 +40,26 @@ namespace Dennokoworks.JointKeeper.Editor
             return colors;
         }
 
+        /// <summary>
+        /// 前腕ツイスト追従率 τ（-1 = 未処理）の頂点カラー。0 = 青（曲げのみ）→ 1 = 赤（元のロール）。
+        /// 4 ボーン制限で丸めた頂点はマゼンタで示す。
+        /// </summary>
+        public static Color[] BuildTwistColors(float[] tau, bool[] quantized)
+        {
+            int n = tau != null ? tau.Length : 0;
+            var colors = new Color[n];
+            for (int i = 0; i < n; i++)
+            {
+                if (tau[i] < 0f)
+                    colors[i] = ColUnmodified;
+                else if (quantized != null && i < quantized.Length && quantized[i])
+                    colors[i] = ColTier4;
+                else
+                    colors[i] = Color.Lerp(new Color(0.10f, 0.35f, 0.95f, 1f), new Color(0.95f, 0.20f, 0.15f, 1f), Mathf.Clamp01(tau[i]));
+            }
+            return colors;
+        }
+
         public static Color[] BuildDiagnosticColors(VertexSlotTier[] tiers)
         {
             int n = tiers != null ? tiers.Length : 0;

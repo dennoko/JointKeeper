@@ -90,6 +90,7 @@ namespace Dennokoworks.JointKeeper.Editor
             public Mesh AfterMesh;
             public Mesh WeightHeatmapMesh;
             public Mesh DiagHeatmapMesh;
+            public Mesh TwistHeatmapMesh;
             public Transform[] AfterShadowBones;
             public Transform[] BeforeShadowBones;
             public Material[] HeatmapMaterials;
@@ -142,6 +143,7 @@ namespace Dennokoworks.JointKeeper.Editor
             var aliasMap = PreviewBoneResolver.BuildAliasMap(avatarRoot);
             var kinematicCtx = AvatarKinematicContext.Build(avatarRoot, animator, humanoidBones);
             var measuredAxes = JointKeeperPreviewState.GetCachedMeasuredAxes(avatarRoot);
+            var twistSamples = JointKeeperPreviewState.GetCachedTwistSamples(avatarRoot);
 
             Vector3 avatarForward = JointFrameSolver.ComputeAvatarForward(animator, avatarRoot.transform, out _, humanoidBones);
             Vector3 avatarUp = avatarRoot.transform.up;
@@ -172,18 +174,20 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (smr == null || smr.sharedMesh == null || smr.bones == null || smr.bones.Length == 0)
                     continue;
 
-                var data = BuildRendererPreviewData(smr, ownership, humanoidBones, kinematicCtx, baseFrames, aliasMap);
+                var data = BuildRendererPreviewData(smr, ownership, humanoidBones, kinematicCtx, baseFrames, aliasMap, measuredAxes, twistSamples);
                 _dataByOriginal[orig] = data;
             }
         }
 
         private RendererPreviewData BuildRendererPreviewData(
             SkinnedMeshRenderer smr,
-            Dictionary<(SkinnedMeshRenderer, JointId), JointConfig> ownership,
+            Dictionary<(SkinnedMeshRenderer, JointId), (JointConfig cfg, ForearmTwistConfig twist)> ownership,
             Dictionary<HumanBodyBones, Transform> humanoidBones,
             AvatarKinematicContext kinematicCtx,
             Dictionary<JointId, JointFrame> baseFrames,
-            Dictionary<Transform, Transform> aliasMap)
+            Dictionary<Transform, Transform> aliasMap,
+            Dictionary<JointId, Vector3> measuredAxes,
+            Dictionary<JointId, TwistAxisSample> twistSamples)
         {
             var data = new RendererPreviewData
             {
@@ -197,28 +201,56 @@ namespace Dennokoworks.JointKeeper.Editor
 
             var scaleAdjusterMap = PreviewBoneResolver.CollectScaleAdjusterScales(smr.bones);
             Vector3[] worldVerts = SkinningEvaluator.EvaluateWorldVerticesCpu(smr, scaleAdjusterMap);
-            var workingBones = new List<Transform>(smr.bones);
+            Transform[] origBones = smr.bones;
+            var workingBones = new List<Transform>(origBones);
             var workingBindposes = new List<Matrix4x4>(origMesh.bindposes);
             BoneWeight[] workingWeights = (BoneWeight[])origMesh.boneWeights.Clone();
             var combinedHelperWeights = new float[vertCount];
             var combinedTiers = new VertexSlotTier[vertCount];
+            var combinedTau = new float[vertCount];
+            var combinedQuantized = new bool[vertCount];
+            for (int v = 0; v < vertCount; v++) combinedTau[v] = -1f;
             bool anyModified = false;
+
+            Transform ResolveAlias(Transform t)
+            {
+                if (t == null) return null;
+                return (aliasMap != null && aliasMap.TryGetValue(t, out var mapped)) ? mapped : t;
+            }
+
+            Matrix4x4 SkinMatrix(int idx)
+            {
+                Matrix4x4 world = workingBones[idx].localToWorldMatrix;
+                if (scaleAdjusterMap.TryGetValue(workingBones[idx], out Vector3 sc))
+                    world = world * Matrix4x4.Scale(sc);
+                return world * workingBindposes[idx];
+            }
 
             foreach (var jointId in AllJoints)
             {
-                if (!ownership.TryGetValue((smr, jointId), out JointConfig cfg))
+                if (!ownership.TryGetValue((smr, jointId), out var owned))
                     continue;
                 if (!baseFrames.TryGetValue(jointId, out JointFrame baseFrame))
                     continue;
+
+                JointConfig cfg = owned.cfg;
+                ForearmTwistConfig twistCfg = owned.twist;
 
                 Transform upper = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetUpperHumanoidBone());
                 Transform lower = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetLowerHumanoidBone());
                 Transform child = HumanoidBoneResolver.GetBone(humanoidBones, jointId.GetChildHumanoidBone());
                 if (upper == null || lower == null) continue;
 
+                // 関節 × 機能単位の二重適用防止（ビルドと同じ判定）
+                bool elbowOn = cfg.enabled && !JointKeeperGeneratedNames.ReferencesHelperBone(origBones, jointId);
+                bool twistOn = jointId.IsElbow() && twistCfg != null && twistCfg.enabled
+                    && !JointKeeperGeneratedNames.ReferencesTwistBone(origBones, jointId);
+                if (!elbowOn && !twistOn) continue;
+
                 JointFrame frame = baseFrame.WithOffsets(cfg.pivotOffset, cfg.outwardAngleOffset);
+                Transform[] bonesSnapshot = workingBones.ToArray();
                 var groups = TwistBoneClassifier.Classify(
-                    jointId, upper, lower, child, workingBones.ToArray(), cfg, kinematicCtx,
+                    jointId, upper, lower, child, bonesSnapshot, cfg, kinematicCtx,
                     workingWeights, worldVerts, frame, aliasMap);
 
                 if (groups.ProximalBoneIndices.Count == 0 || groups.DistalBoneIndices.Count == 0)
@@ -226,57 +258,133 @@ namespace Dennokoworks.JointKeeper.Editor
                 if (groups.ProximalReferenceBoneIndex < 0 || groups.DistalReferenceBoneIndex < 0)
                     continue;
 
-                int placeholderIdx = workingBones.Count;
-                var redParams = WeightRedistributionParams.FromConfig(frame, cfg);
-                var res = WeightRedistributor.Redistribute(
-                    workingWeights, worldVerts,
-                    groups.ProximalBoneIndices, groups.DistalBoneIndices, groups.PrimaryHumanoidBoneIndices,
-                    placeholderIdx, in redParams);
+                // 肘補助ボーン（ボーン未生成で計算）
+                WeightRedistributionResult res = null;
+                if (elbowOn)
+                {
+                    var redParams = WeightRedistributionParams.FromConfig(frame, cfg);
+                    res = WeightRedistributor.Redistribute(
+                        workingWeights, worldVerts,
+                        groups.ProximalBoneIndices, groups.DistalBoneIndices, groups.PrimaryHumanoidBoneIndices,
+                        workingBones.Count, in redParams);
+                    if (res.Stats.AffectedVertices == 0)
+                        res = null;
+                }
 
-                if (res.Stats.AffectedVertices == 0)
+                // 前腕ツイスト分散（肘処理後のウェイトに対して計画）
+                ForearmTwistPlan twistPlan = null;
+                ForearmTwistGeometry twistGeo = default;
+                if (twistOn && groups.DistalRigidBoneIndices.Count > 0)
+                {
+                    BoneWeight[] twistInput = res != null ? res.NewWeights : workingWeights;
+                    var diag = ForearmTwistProcessor.Analyze(twistInput, bonesSnapshot, groups, kinematicCtx, ResolveAlias);
+                    bool blocked = diag.HasExistingTwistRig && !twistCfg.applyEvenIfExistingTwistRig;
+
+                    Vector3? measuredRoll = null;
+                    if (twistSamples != null && twistSamples.TryGetValue(jointId, out var sample) && sample.HasAxis)
+                        measuredRoll = sample.Axis;
+                    Vector3 hinge = (measuredAxes != null && measuredAxes.TryGetValue(jointId, out var h)) ? h : baseFrame.HingeAxis;
+
+                    if (!blocked && diag.RigidVertexCount > 0
+                        && ForearmTwistGeometry.TryCompute(groups.DistalSource, child, measuredRoll, hinge, baseFrame.LimbLength, out twistGeo, out _))
+                    {
+                        var lookup = new Dictionary<Transform, int>();
+                        for (int i = 0; i < bonesSnapshot.Length; i++)
+                        {
+                            Transform r = ResolveAlias(bonesSnapshot[i]);
+                            if (r != null && !lookup.ContainsKey(r))
+                                lookup[r] = i;
+                        }
+
+                        twistPlan = ForearmTwistProcessor.Plan(
+                            twistInput, worldVerts, groups, twistCfg, twistGeo,
+                            workingBones.Count + (res != null ? 1 : 0),
+                            t => (t != null && lookup.TryGetValue(t, out int idx)) ? idx : -1);
+                        if (!twistPlan.HasChanges)
+                            twistPlan = null;
+                    }
+                }
+
+                if (res == null && twistPlan == null)
                     continue;
 
-                var rigKey = new RigSignatureKey(
-                    jointId,
-                    groups.ProximalSource.GetInstanceID(),
-                    groups.DistalSource.GetInstanceID(),
-                    cfg.bendFollowRatio,
-                    cfg.pushAt90Deg,
-                    cfg.pivotOffset,
-                    cfg.outwardAngleOffset);
+                // 影の N を先に作り、影の肘補助ボーンの遠位ソースにする (ADR-10)
+                Transform shadowTwistBase = twistPlan != null
+                    ? _pose.GetOrCreateShadowTwistBase(jointId, twistGeo, groups.ProximalSource, groups.DistalSource)
+                    : null;
+                if (twistPlan != null && shadowTwistBase == null)
+                    twistPlan = null;
 
-                Transform shadowHelper = _pose.GetOrCreateShadowHelper(
-                    rigKey, frame, groups.ProximalSource, groups.DistalSource,
-                    cfg.bendFollowRatio, cfg.pushAt90Deg);
-                if (shadowHelper == null) continue;
-
-                int pRef = groups.ProximalReferenceBoneIndex;
-                int dRef = groups.DistalReferenceBoneIndex;
-
-                Matrix4x4 pWorld = workingBones[pRef].localToWorldMatrix;
-                if (scaleAdjusterMap.TryGetValue(workingBones[pRef], out Vector3 pScale))
-                    pWorld = pWorld * Matrix4x4.Scale(pScale);
-
-                Matrix4x4 dWorld = workingBones[dRef].localToWorldMatrix;
-                if (scaleAdjusterMap.TryGetValue(workingBones[dRef], out Vector3 dScale))
-                    dWorld = dWorld * Matrix4x4.Scale(dScale);
-
-                Matrix4x4 sp = pWorld * workingBindposes[pRef];
-                Matrix4x4 sd = dWorld * workingBindposes[dRef];
-                Matrix4x4 helperBind = SkinningEvaluator.ComputeHelperBindpose(
-                    shadowHelper.localToWorldMatrix, sp, sd, Mathf.Clamp(cfg.bendFollowRatio, 0.1f, 0.9f));
-
-                workingBones.Add(shadowHelper);
-                workingBindposes.Add(helperBind);
-                workingWeights = res.NewWeights;
-                anyModified = true;
-
-                for (int v = 0; v < vertCount; v++)
+                if (res != null)
                 {
-                    if (res.HelperWeights[v] > combinedHelperWeights[v])
-                        combinedHelperWeights[v] = res.HelperWeights[v];
-                    if (res.VertexTiers[v] > combinedTiers[v])
-                        combinedTiers[v] = res.VertexTiers[v];
+                    bool useBase = shadowTwistBase != null && twistCfg.bendOnlyElbowHelper;
+                    var rigKey = new RigSignatureKey(
+                        jointId,
+                        groups.ProximalSource.GetInstanceID(),
+                        useBase ? shadowTwistBase.GetInstanceID() : groups.DistalSource.GetInstanceID(),
+                        cfg.bendFollowRatio,
+                        cfg.pushAt90Deg,
+                        cfg.pivotOffset,
+                        cfg.outwardAngleOffset);
+
+                    Transform shadowHelper = _pose.GetOrCreateShadowHelper(
+                        rigKey, frame, groups.ProximalSource, groups.DistalSource,
+                        cfg.bendFollowRatio, cfg.pushAt90Deg,
+                        useBase ? shadowTwistBase : null);
+
+                    if (shadowHelper != null)
+                    {
+                        Matrix4x4 sp = SkinMatrix(groups.ProximalReferenceBoneIndex);
+                        Matrix4x4 sd = SkinMatrix(groups.DistalReferenceBoneIndex);
+                        Matrix4x4 helperBind = SkinningEvaluator.ComputeHelperBindpose(
+                            shadowHelper.localToWorldMatrix, sp, sd, Mathf.Clamp(cfg.bendFollowRatio, 0.1f, 0.9f));
+
+                        workingBones.Add(shadowHelper);
+                        workingBindposes.Add(helperBind);
+                        workingWeights = res.NewWeights;
+                        anyModified = true;
+
+                        for (int v = 0; v < vertCount; v++)
+                        {
+                            if (res.HelperWeights[v] > combinedHelperWeights[v])
+                                combinedHelperWeights[v] = res.HelperWeights[v];
+                            if (res.VertexTiers[v] > combinedTiers[v])
+                                combinedTiers[v] = res.VertexTiers[v];
+                        }
+                    }
+                    else if (twistPlan != null)
+                    {
+                        // 補助ボーンを作れなかった場合、ツイスト計画は肘処理後のウェイト前提なので破棄
+                        twistPlan = null;
+                    }
+                }
+
+                if (twistPlan != null)
+                {
+                    Matrix4x4 sRef = SkinMatrix(twistPlan.RigidReferenceBoneIndex);
+                    float[] knots = twistPlan.Knots;
+                    Transform distalShadow = _pose.GetConstraintShadowBone(groups.DistalSource);
+                    ForearmTwistGeometry geo = twistGeo;
+
+                    workingWeights = ForearmTwistProcessor.Commit(
+                        twistPlan,
+                        j =>
+                        {
+                            if (j == 0) return shadowTwistBase;
+                            if (knots[j] >= 1f - 1e-5f) return distalShadow;
+                            return _pose.GetOrCreateShadowTwistKnot(shadowTwistBase, knots[j], geo);
+                        },
+                        workingBones,
+                        workingBindposes,
+                        sRef);
+                    anyModified = true;
+
+                    for (int v = 0; v < vertCount; v++)
+                    {
+                        if (twistPlan.Result.TauValues[v] >= 0f)
+                            combinedTau[v] = twistPlan.Result.TauValues[v];
+                        combinedQuantized[v] |= twistPlan.Result.QuantizedMask[v];
+                    }
                 }
             }
 
@@ -299,6 +407,11 @@ namespace Dennokoworks.JointKeeper.Editor
             diagHm.colors = JointKeeperHeatmapDrawer.BuildDiagnosticColors(combinedTiers);
             _createdMeshes.Add(diagHm);
 
+            Mesh twistHm = UnityEngine.Object.Instantiate(afterMesh);
+            twistHm.hideFlags = HideFlags.HideAndDontSave;
+            twistHm.colors = JointKeeperHeatmapDrawer.BuildTwistColors(combinedTau, combinedQuantized);
+            _createdMeshes.Add(twistHm);
+
             int subMeshCount = Mathf.Max(1, origMesh.subMeshCount);
             var hmMats = new Material[subMeshCount];
             for (int i = 0; i < subMeshCount; i++)
@@ -307,17 +420,18 @@ namespace Dennokoworks.JointKeeper.Editor
             data.AfterMesh = afterMesh;
             data.WeightHeatmapMesh = weightHm;
             data.DiagHeatmapMesh = diagHm;
+            data.TwistHeatmapMesh = twistHm;
             data.AfterShadowBones = _pose.MapBonesToShadow(workingBones.ToArray());
             data.HeatmapMaterials = hmMats;
             data.HasJointKeeperChanges = true;
             return data;
         }
 
-        private static Dictionary<(SkinnedMeshRenderer, JointId), JointConfig> ResolvePreviewOwnership(
+        private static Dictionary<(SkinnedMeshRenderer, JointId), (JointConfig cfg, ForearmTwistConfig twist)> ResolvePreviewOwnership(
             List<JointKeeperComponent> components,
             Transform avatarRoot)
         {
-            var result = new Dictionary<(SkinnedMeshRenderer, JointId), JointConfig>();
+            var result = new Dictionary<(SkinnedMeshRenderer, JointId), (JointConfig, ForearmTwistConfig)>();
             var prio = new Dictionary<(SkinnedMeshRenderer, JointId), (bool isManual, int depth)>();
 
             for (int i = 0; i < components.Count; i++)
@@ -337,14 +451,15 @@ namespace Dennokoworks.JointKeeper.Editor
                     foreach (var jointId in AllJoints)
                     {
                         var cfg = comp.ResolveConfig(jointId);
-                        if (!cfg.enabled) continue;
+                        var twist = comp.ResolveTwistConfig(jointId);
+                        if (!cfg.enabled && !(jointId.IsElbow() && twist.enabled)) continue;
                         var key = (smr, jointId);
                         if (!prio.TryGetValue(key, out var existing)
                             || (isManual && !existing.isManual)
                             || (isManual == existing.isManual && depth <= existing.depth))
                         {
                             prio[key] = (isManual, depth);
-                            result[key] = cfg;
+                            result[key] = (cfg, twist);
                         }
                     }
                 }
@@ -383,6 +498,12 @@ namespace Dennokoworks.JointKeeper.Editor
             else if (hm == PreviewHeatmapMode.FourBoneDiagnostics && data.DiagHeatmapMesh != null)
             {
                 proxySmr.sharedMesh = data.DiagHeatmapMesh;
+                proxySmr.bones = data.AfterShadowBones;
+                proxySmr.sharedMaterials = data.HeatmapMaterials;
+            }
+            else if (hm == PreviewHeatmapMode.TwistFollow && data.TwistHeatmapMesh != null)
+            {
+                proxySmr.sharedMesh = data.TwistHeatmapMesh;
                 proxySmr.bones = data.AfterShadowBones;
                 proxySmr.sharedMaterials = data.HeatmapMaterials;
             }
